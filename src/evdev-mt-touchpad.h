@@ -1,23 +1,24 @@
 /*
  * Copyright © 2014-2015 Red Hat, Inc.
  *
- * Permission to use, copy, modify, distribute, and sell this software and
- * its documentation for any purpose is hereby granted without fee, provided
- * that the above copyright notice appear in all copies and that both that
- * copyright notice and this permission notice appear in supporting
- * documentation, and that the name of the copyright holders not be used in
- * advertising or publicity pertaining to distribution of the software
- * without specific, written prior permission.  The copyright holders make
- * no representations about the suitability of this software for any
- * purpose.  It is provided "as is" without express or implied warranty.
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
  *
- * THE COPYRIGHT HOLDERS DISCLAIM ALL WARRANTIES WITH REGARD TO THIS
- * SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
- * FITNESS, IN NO EVENT SHALL THE COPYRIGHT HOLDERS BE LIABLE FOR ANY
- * SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER
- * RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF
- * CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
- * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
  */
 
 #ifndef EVDEV_MT_TOUCHPAD_H
@@ -63,6 +64,7 @@ enum touch_palm_state {
 	PALM_NONE = 0,
 	PALM_EDGE,
 	PALM_TYPING,
+	PALM_TRACKPOINT,
 };
 
 enum button_event {
@@ -127,14 +129,23 @@ enum tp_edge_scroll_touch_state {
 	EDGE_SCROLL_TOUCH_STATE_AREA,
 };
 
+enum tp_gesture_2fg_state {
+	GESTURE_2FG_STATE_NONE,
+	GESTURE_2FG_STATE_UNKNOWN,
+	GESTURE_2FG_STATE_SCROLL,
+	GESTURE_2FG_STATE_PINCH,
+};
+
 struct tp_touch {
 	struct tp_dispatch *tp;
 	enum touch_state state;
 	bool has_ended;				/* TRACKING_ID == -1 */
 	bool dirty;
+	bool is_thumb;
 	struct device_coords point;
 	uint64_t millis;
 	int distance;				/* distance == 0 means touch */
+	int pressure;
 
 	struct {
 		struct device_coords samples[TOUCHPAD_HISTORY_LENGTH];
@@ -164,6 +175,7 @@ struct tp_touch {
 	struct {
 		enum tp_tap_touch_state state;
 		struct device_coords initial;
+		bool is_thumb;
 	} tap;
 
 	struct {
@@ -179,6 +191,10 @@ struct tp_touch {
 		struct device_coords first; /* first coordinates if is_palm == true */
 		uint32_t time; /* first timestamp if is_palm == true */
 	} palm;
+
+	struct {
+		struct device_coords initial;
+	} gesture;
 };
 
 struct tp_dispatch {
@@ -214,6 +230,14 @@ struct tp_dispatch {
 		unsigned int finger_count;
 		unsigned int finger_count_pending;
 		struct libinput_timer finger_count_switch_timer;
+		enum tp_gesture_2fg_state twofinger_state;
+		struct tp_touch *touches[2];
+		uint64_t initial_time;
+		double initial_distance;
+		double prev_scale;
+		double angle;
+		struct device_float_coords center;
+		uint32_t thumb_mask;
 	} gesture;
 
 	struct {
@@ -223,7 +247,10 @@ struct tp_dispatch {
 		bool click_pending;
 		uint32_t state;
 		uint32_t old_state;
-		uint32_t motion_dist;		/* for pinned touches */
+		struct {
+			double x_scale_coeff;
+			double y_scale_coeff;
+		} motion_dist;			/* for pinned touches */
 		unsigned int active;		/* currently active button, for release event */
 		bool active_is_topbutton;	/* is active a top button? */
 
@@ -265,21 +292,25 @@ struct tp_dispatch {
 		enum tp_tap_state state;
 		uint32_t buttons_pressed;
 		uint64_t multitap_last_time;
+
+		bool drag_lock_enabled;
 	} tap;
 
 	struct {
 		int32_t right_edge;		/* in device coordinates */
 		int32_t left_edge;		/* in device coordinates */
 		int32_t vert_center;		/* in device coordinates */
+
+		bool trackpoint_active;
+		struct libinput_event_listener trackpoint_listener;
+		struct libinput_timer trackpoint_timer;
+		uint64_t trackpoint_last_event_time;
+		bool monitor_trackpoint;
 	} palm;
 
 	struct {
 		struct libinput_device_config_send_events config;
 		enum libinput_config_send_events_mode current_mode;
-
-		bool trackpoint_active;
-		struct libinput_event_listener trackpoint_listener;
-		struct libinput_timer trackpoint_timer;
 	} sendevents;
 
 	struct {
@@ -290,6 +321,11 @@ struct tp_dispatch {
 
 		uint64_t keyboard_last_press_time;
 	} dwt;
+
+	struct {
+		bool detect_thumbs;
+		int threshold;
+	} thumb;
 };
 
 #define tp_for_each_touch(_tp, _t) \
@@ -310,6 +346,21 @@ tp_normalize_delta(struct tp_dispatch *tp, struct device_float_coords delta)
 	normalized.y = delta.y * tp->accel.y_scale_coeff;
 
 	return normalized;
+}
+
+/**
+ * Takes a dpi-normalized set of coordinates, returns a set of coordinates
+ * in the x-axis' coordinate space.
+ */
+static inline struct device_float_coords
+tp_unnormalize_for_xaxis(struct tp_dispatch *tp, struct normalized_coords delta)
+{
+	struct device_float_coords raw;
+
+	raw.x = delta.x / tp->accel.x_scale_coeff;
+	raw.y = delta.y / tp->accel.x_scale_coeff; /* <--- not a typo */
+
+	return raw;
 }
 
 struct normalized_coords
@@ -395,6 +446,9 @@ tp_edge_scroll_stop_events(struct tp_dispatch *tp, uint64_t time);
 int
 tp_edge_scroll_touch_active(struct tp_dispatch *tp, struct tp_touch *t);
 
+uint32_t
+tp_touch_get_edge(struct tp_dispatch *tp, struct tp_touch *t);
+
 int
 tp_init_gesture(struct tp_dispatch *tp);
 
@@ -403,6 +457,9 @@ tp_remove_gesture(struct tp_dispatch *tp);
 
 void
 tp_gesture_stop(struct tp_dispatch *tp, uint64_t time);
+
+void
+tp_gesture_cancel(struct tp_dispatch *tp, uint64_t time);
 
 void
 tp_gesture_handle_state(struct tp_dispatch *tp, uint64_t time);

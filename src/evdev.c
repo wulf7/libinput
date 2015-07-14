@@ -3,23 +3,24 @@
  * Copyright © 2013 Jonas Ådahl
  * Copyright © 2013-2015 Red Hat, Inc.
  *
- * Permission to use, copy, modify, distribute, and sell this software and
- * its documentation for any purpose is hereby granted without fee, provided
- * that the above copyright notice appear in all copies and that both that
- * copyright notice and this permission notice appear in supporting
- * documentation, and that the name of the copyright holders not be used in
- * advertising or publicity pertaining to distribution of the software
- * without specific, written prior permission.  The copyright holders make
- * no representations about the suitability of this software for any
- * purpose.  It is provided "as is" without express or implied warranty.
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
  *
- * THE COPYRIGHT HOLDERS DISCLAIM ALL WARRANTIES WITH REGARD TO THIS
- * SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
- * FITNESS, IN NO EVENT SHALL THE COPYRIGHT HOLDERS BE LIABLE FOR ANY
- * SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER
- * RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF
- * CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
- * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
  */
 
 #include "config.h"
@@ -30,6 +31,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include "linux/input.h"
 #include <unistd.h>
 #include <fcntl.h>
@@ -256,6 +258,23 @@ normalize_delta(struct evdev_device *device,
 	normalized->y = delta->y * DEFAULT_MOUSE_DPI / (double)device->dpi;
 }
 
+static inline bool
+evdev_post_trackpoint_scroll(struct evdev_device *device,
+			     struct normalized_coords unaccel,
+			     uint64_t time)
+{
+	if (device->scroll.method != LIBINPUT_CONFIG_SCROLL_ON_BUTTON_DOWN ||
+	    !hw_is_key_down(device, device->scroll.button))
+		return false;
+
+	if (device->scroll.button_scroll_active)
+		evdev_post_scroll(device, time,
+				  LIBINPUT_POINTER_AXIS_SOURCE_CONTINUOUS,
+				  &unaccel);
+
+	return true;
+}
+
 static void
 evdev_flush_pending_event(struct evdev_device *device, uint64_t time)
 {
@@ -266,6 +285,7 @@ evdev_flush_pending_event(struct evdev_device *device, uint64_t time)
 	struct libinput_seat *seat = base->seat;
 	struct normalized_coords accel, unaccel;
 	struct device_coords point;
+	struct device_float_coords raw;
 
 	slot = device->mt.slot;
 
@@ -274,18 +294,14 @@ evdev_flush_pending_event(struct evdev_device *device, uint64_t time)
 		return;
 	case EVDEV_RELATIVE_MOTION:
 		normalize_delta(device, &device->rel, &unaccel);
+		raw.x = device->rel.x;
+		raw.y = device->rel.y;
 		device->rel.x = 0;
 		device->rel.y = 0;
 
 		/* Use unaccelerated deltas for pointing stick scroll */
-		if (device->scroll.method == LIBINPUT_CONFIG_SCROLL_ON_BUTTON_DOWN &&
-		    hw_is_key_down(device, device->scroll.button)) {
-			if (device->scroll.button_scroll_active)
-				evdev_post_scroll(device, time,
-						  LIBINPUT_POINTER_AXIS_SOURCE_CONTINUOUS,
-						  &unaccel);
-			break;
-		}
+		if (evdev_post_trackpoint_scroll(device, unaccel, time))
+		    break;
 
 		/* Apply pointer acceleration. */
 		accel = filter_dispatch(device->pointer.filter,
@@ -296,7 +312,7 @@ evdev_flush_pending_event(struct evdev_device *device, uint64_t time)
 		if (normalized_is_zero(accel) && normalized_is_zero(unaccel))
 			break;
 
-		pointer_notify_motion(base, time, &accel, &unaccel);
+		pointer_notify_motion(base, time, &accel, &raw);
 		break;
 	case EVDEV_ABSOLUTE_MT_DOWN:
 		if (!(device->seat_caps & EVDEV_DEVICE_TOUCH))
@@ -1402,7 +1418,8 @@ int
 evdev_device_init_pointer_acceleration(struct evdev_device *device,
 				       accel_profile_func_t profile)
 {
-	device->pointer.filter = create_pointer_accelerator_filter(profile);
+	device->pointer.filter = create_pointer_accelerator_filter(profile,
+								   device->dpi);
 	if (!device->pointer.filter)
 		return -1;
 
@@ -1505,6 +1522,10 @@ evdev_read_dpi_prop(struct evdev_device *device)
 					    DEFAULT_MOUSE_DPI);
 			dpi = DEFAULT_MOUSE_DPI;
 		}
+		log_info(libinput,
+			 "Device '%s' set to %d DPI\n",
+			 device->devname,
+			 dpi);
 	}
 
 	return dpi;
@@ -1523,6 +1544,9 @@ evdev_read_model(struct evdev_device *device)
 		{ "LIBINPUT_MODEL_SYSTEM76_GALAGO", EVDEV_MODEL_SYSTEM76_GALAGO },
 		{ "LIBINPUT_MODEL_SYSTEM76_KUDU", EVDEV_MODEL_SYSTEM76_KUDU },
 		{ "LIBINPUT_MODEL_CLEVO_W740SU", EVDEV_MODEL_CLEVO_W740SU },
+		{ "LIBINPUT_MODEL_APPLE_TOUCHPAD", EVDEV_MODEL_APPLE_TOUCHPAD },
+		{ "LIBINPUT_MODEL_WACOM_TOUCHPAD", EVDEV_MODEL_WACOM_TOUCHPAD },
+		{ "LIBINPUT_MODEL_ALPS_TOUCHPAD", EVDEV_MODEL_ALPS_TOUCHPAD },
 		{ NULL, EVDEV_MODEL_DEFAULT },
 	};
 	const struct model_map *m = model_map;
@@ -1537,19 +1561,35 @@ evdev_read_model(struct evdev_device *device)
 	return m->model;
 }
 
-/* Return 1 if the given resolutions have been set, or 0 otherwise */
-inline int
+static inline int
+evdev_read_attr_size_prop(struct evdev_device *device,
+			  size_t *size_x,
+			  size_t *size_y)
+{
+	struct udev_device *udev;
+	const char *size_prop;
+
+	udev = device->udev_device;
+	size_prop = udev_device_get_property_value(udev,
+						   "LIBINPUT_ATTR_SIZE_HINT");
+	if (!size_prop)
+		return false;
+
+	return parse_dimension_property(size_prop, size_x, size_y);
+}
+
+/* Return 1 if the device is set to the fake resolution or 0 otherwise */
+static inline int
 evdev_fix_abs_resolution(struct evdev_device *device,
 			 unsigned int xcode,
-			 unsigned int ycode,
-			 int xresolution,
-			 int yresolution)
+			 unsigned int ycode)
 {
 	struct libinput *libinput = device->base.seat->libinput;
 	struct libevdev *evdev = device->evdev;
 	const struct input_absinfo *absx, *absy;
-	struct input_absinfo fixed;
-	int rc = 0;
+	size_t widthmm = 0, heightmm = 0;
+	int xres = EVDEV_FAKE_RESOLUTION,
+	    yres = EVDEV_FAKE_RESOLUTION;
 
 	if (!(xcode == ABS_X && ycode == ABS_Y)  &&
 	    !(xcode == ABS_MT_POSITION_X && ycode == ABS_MT_POSITION_Y)) {
@@ -1559,37 +1599,28 @@ evdev_fix_abs_resolution(struct evdev_device *device,
 		return 0;
 	}
 
-	if (xresolution == 0 || yresolution == 0 ||
-	    (xresolution == EVDEV_FAKE_RESOLUTION && xresolution != yresolution) ||
-	    (yresolution == EVDEV_FAKE_RESOLUTION && xresolution != yresolution)) {
-		log_bug_libinput(libinput,
-				 "Invalid x/y resolutions %d/%d\n",
-				 xresolution, yresolution);
-		return 0;
-	}
-
 	absx = libevdev_get_abs_info(evdev, xcode);
 	absy = libevdev_get_abs_info(evdev, ycode);
 
-	if (absx->resolution == 0 || absx->resolution == EVDEV_FAKE_RESOLUTION) {
-		fixed = *absx;
-		fixed.resolution = xresolution;
-		/* libevdev_set_abs_info() changes the absinfo we already
-		   have a pointer to, no need to fetch it again */
-		libevdev_set_abs_info(evdev, xcode, &fixed);
-		rc = 1;
+	if (absx->resolution != 0 || absy->resolution != 0)
+		return 0;
+
+	/* Note: we *do not* override resolutions if provided by the kernel.
+	 * If a device needs this, add it to 60-evdev.hwdb. The libinput
+	 * property is only for general size hints where we can make
+	 * educated guesses but don't know better.
+	 */
+	if (evdev_read_attr_size_prop(device, &widthmm, &heightmm)) {
+		xres = (absx->maximum - absx->minimum)/widthmm;
+		yres = (absy->maximum - absy->minimum)/heightmm;
 	}
 
-	if (absy->resolution == 0 || absy->resolution == EVDEV_FAKE_RESOLUTION) {
-		fixed = *absy;
-		fixed.resolution = yresolution;
-		/* libevdev_set_abs_info() changes the absinfo we already
-		   have a pointer to, no need to fetch it again */
-		libevdev_set_abs_info(evdev, ycode, &fixed);
-		rc = 1;
-	}
+	/* libevdev_set_abs_resolution() changes the absinfo we already
+	   have a pointer to, no need to fetch it again */
+	libevdev_set_abs_resolution(evdev, xcode, xres);
+	libevdev_set_abs_resolution(evdev, ycode, yres);
 
-	return rc;
+	return xres == EVDEV_FAKE_RESOLUTION;
 }
 
 static enum evdev_device_udev_tags
@@ -1760,13 +1791,15 @@ evdev_configure_mt_device(struct evdev_device *device)
 
 	if (evdev_fix_abs_resolution(device,
 				     ABS_MT_POSITION_X,
-				     ABS_MT_POSITION_Y,
-				     EVDEV_FAKE_RESOLUTION,
-				     EVDEV_FAKE_RESOLUTION))
+				     ABS_MT_POSITION_Y))
 		device->abs.fake_resolution = 1;
 
 	device->abs.absinfo_x = libevdev_get_abs_info(evdev, ABS_MT_POSITION_X);
 	device->abs.absinfo_y = libevdev_get_abs_info(evdev, ABS_MT_POSITION_Y);
+	device->abs.dimensions.x = abs(device->abs.absinfo_x->maximum -
+				       device->abs.absinfo_x->minimum);
+	device->abs.dimensions.y = abs(device->abs.absinfo_y->maximum -
+				       device->abs.absinfo_y->minimum);
 	device->is_mt = 1;
 
 	/* We only handle the slotted Protocol B in libinput.
@@ -1814,6 +1847,19 @@ evdev_configure_mt_device(struct evdev_device *device)
 	device->mt.slot = active_slot;
 
 	return 0;
+}
+
+static inline int
+evdev_init_accel(struct evdev_device *device)
+{
+	accel_profile_func_t profile;
+
+	if (device->dpi < DEFAULT_MOUSE_DPI)
+		profile = pointer_accel_profile_linear_low_dpi;
+	else
+		profile = pointer_accel_profile_linear;
+
+	return evdev_device_init_pointer_acceleration(device, profile);
 }
 
 static int
@@ -1875,16 +1921,16 @@ evdev_configure_device(struct evdev_device *device)
 		evdev_fix_android_mt(device);
 
 	if (libevdev_has_event_code(evdev, EV_ABS, ABS_X)) {
-		if (evdev_fix_abs_resolution(device,
-					     ABS_X,
-					     ABS_Y,
-					     EVDEV_FAKE_RESOLUTION,
-					     EVDEV_FAKE_RESOLUTION))
+		if (evdev_fix_abs_resolution(device, ABS_X, ABS_Y))
 			device->abs.fake_resolution = 1;
 		device->abs.absinfo_x = libevdev_get_abs_info(evdev, ABS_X);
 		device->abs.absinfo_y = libevdev_get_abs_info(evdev, ABS_Y);
 		device->abs.point.x = device->abs.absinfo_x->value;
 		device->abs.point.y = device->abs.absinfo_y->value;
+		device->abs.dimensions.x = abs(device->abs.absinfo_x->maximum -
+					       device->abs.absinfo_x->minimum);
+		device->abs.dimensions.y = abs(device->abs.absinfo_y->maximum -
+					       device->abs.absinfo_y->minimum);
 
 		if (evdev_is_fake_mt_device(device)) {
 			udev_tags &= ~EVDEV_UDEV_TAG_TOUCHSCREEN;
@@ -1895,6 +1941,7 @@ evdev_configure_device(struct evdev_device *device)
 
 	if (udev_tags & EVDEV_UDEV_TAG_TOUCHPAD) {
 		device->dispatch = evdev_mt_touchpad_create(device);
+		device->seat_caps |= EVDEV_DEVICE_GESTURE;
 		log_info(libinput,
 			 "input device '%s', %s is a touchpad\n",
 			 device->devname, devnode);
@@ -1907,9 +1954,7 @@ evdev_configure_device(struct evdev_device *device)
 	    udev_tags & EVDEV_UDEV_TAG_POINTINGSTICK) {
 		if (libevdev_has_event_code(evdev, EV_REL, REL_X) &&
 		    libevdev_has_event_code(evdev, EV_REL, REL_Y) &&
-		    evdev_device_init_pointer_acceleration(
-					device,
-					pointer_accel_profile_linear) == -1)
+		    evdev_init_accel(device) == -1)
 			return -1;
 
 		device->seat_caps |= EVDEV_DEVICE_POINTER;
@@ -2095,6 +2140,8 @@ evdev_device_create(struct libinput_seat *seat,
 	device->scroll.wheel_click_angle =
 		evdev_read_wheel_click_prop(device);
 	device->model = evdev_read_model(device);
+	device->dpi = evdev_read_dpi_prop(device);
+
 	/* at most 5 SYN_DROPPED log-messages per 30s */
 	ratelimit_init(&device->syn_drop_limit, 30ULL * 1000, 5);
 
@@ -2104,8 +2151,6 @@ evdev_device_create(struct libinput_seat *seat,
 
 	if (evdev_configure_device(device) == -1)
 		goto err;
-
-	device->dpi = evdev_read_dpi_prop(device);
 
 	if (device->seat_caps == 0) {
 		unhandled_device = 1;
@@ -2260,6 +2305,8 @@ evdev_device_has_capability(struct evdev_device *device,
 		return !!(device->seat_caps & EVDEV_DEVICE_KEYBOARD);
 	case LIBINPUT_DEVICE_CAP_TOUCH:
 		return !!(device->seat_caps & EVDEV_DEVICE_TOUCH);
+	case LIBINPUT_DEVICE_CAP_GESTURE:
+		return !!(device->seat_caps & EVDEV_DEVICE_GESTURE);
 	default:
 		return 0;
 	}

@@ -1,23 +1,24 @@
 /*
  * Copyright © 2015 Red Hat, Inc.
  *
- * Permission to use, copy, modify, distribute, and sell this software and
- * its documentation for any purpose is hereby granted without fee, provided
- * that the above copyright notice appear in all copies and that both that
- * copyright notice and this permission notice appear in supporting
- * documentation, and that the name of the copyright holders not be used in
- * advertising or publicity pertaining to distribution of the software
- * without specific, written prior permission.  The copyright holders make
- * no representations about the suitability of this software for any
- * purpose.  It is provided "as is" without express or implied warranty.
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
  *
- * THE COPYRIGHT HOLDERS DISCLAIM ALL WARRANTIES WITH REGARD TO THIS
- * SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
- * FITNESS, IN NO EVENT SHALL THE COPYRIGHT HOLDERS BE LIABLE FOR ANY
- * SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER
- * RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF
- * CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
- * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
  */
 #define _GNU_SOURCE
 
@@ -94,7 +95,7 @@ print_ptraccel_movement(struct motion_filter *filter,
 		motion.y = 0;
 		time += 12; /* pretend 80Hz data */
 
-		filter_dispatch(filter, &motion, NULL, time);
+		motion = filter_dispatch(filter, &motion, NULL, time);
 
 		printf("%d	%.3f	%.3f\n", i, motion.x, dx);
 
@@ -128,7 +129,7 @@ print_ptraccel_sequence(struct motion_filter *filter,
 		motion.y = 0;
 		time += 12; /* pretend 80Hz data */
 
-		filter_dispatch(filter, &motion, NULL, time);
+		motion = filter_dispatch(filter, &motion, NULL, time);
 
 		printf("%d	%.3f	%.3f\n", i, motion.x, *dx);
 	}
@@ -164,9 +165,10 @@ usage(const char *argv0)
 	       "	delta    ... print delta to accelerated delta\n"
 	       "	accel    ... print accel factor\n"
 	       "	sequence ... print motion for custom delta sequence\n"
-	       "--maxdx=<double>\n  ... in motion mode only. Stop increasing dx at maxdx\n"
-	       "--steps=<double>\n  ... in motion and delta modes only. Increase dx by step each round\n"
-	       "--speed=<double>\n  ... accel speed [-1, 1], default 0\n"
+	       "--maxdx=<double>  ... in motion mode only. Stop increasing dx at maxdx\n"
+	       "--steps=<double>  ... in motion and delta modes only. Increase dx by step each round\n"
+	       "--speed=<double>  ... accel speed [-1, 1], default 0\n"
+	       "--dpi=<int>	... device resolution in DPI (default: 1000)\n"
 	       "\n"
 	       "If extra arguments are present and mode is not given, mode defaults to 'sequence'\n"
 	       "and the arguments are interpreted as sequence of delta x coordinates\n"
@@ -190,16 +192,16 @@ main(int argc, char **argv)
 	     print_sequence = false;
 	double custom_deltas[1024];
 	double speed = 0.0;
+	int dpi = 1000;
+
 	enum {
 		OPT_MODE = 1,
 		OPT_NEVENTS,
 		OPT_MAXDX,
 		OPT_STEP,
 		OPT_SPEED,
+		OPT_DPI,
 	};
-
-	filter = create_pointer_accelerator_filter(pointer_accel_profile_linear);
-	assert(filter != NULL);
 
 	while (1) {
 		int c;
@@ -210,6 +212,7 @@ main(int argc, char **argv)
 			{"maxdx", 1, 0, OPT_MAXDX },
 			{"step", 1, 0, OPT_STEP },
 			{"speed", 1, 0, OPT_SPEED },
+			{"dpi", 1, 0, OPT_DPI },
 			{0, 0, 0, 0}
 		};
 
@@ -257,6 +260,9 @@ main(int argc, char **argv)
 		case OPT_SPEED:
 			speed = strtod(optarg, NULL);
 			break;
+		case OPT_DPI:
+			dpi = strtod(optarg, NULL);
+			break;
 		default:
 			usage(argv[0]);
 			exit(1);
@@ -264,6 +270,9 @@ main(int argc, char **argv)
 		}
 	}
 
+	filter = create_pointer_accelerator_filter(pointer_accel_profile_linear,
+						   dpi);
+	assert(filter != NULL);
 	filter_set_speed(filter, speed);
 
 	if (!isatty(STDIN_FILENO)) {

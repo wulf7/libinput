@@ -1,23 +1,24 @@
 /*
  * Copyright © 2014 Red Hat, Inc.
  *
- * Permission to use, copy, modify, distribute, and sell this software and
- * its documentation for any purpose is hereby granted without fee, provided
- * that the above copyright notice appear in all copies and that both that
- * copyright notice and this permission notice appear in supporting
- * documentation, and that the name of the copyright holders not be used in
- * advertising or publicity pertaining to distribution of the software
- * without specific, written prior permission.  The copyright holders make
- * no representations about the suitability of this software for any
- * purpose.  It is provided "as is" without express or implied warranty.
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
  *
- * THE COPYRIGHT HOLDERS DISCLAIM ALL WARRANTIES WITH REGARD TO THIS
- * SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
- * FITNESS, IN NO EVENT SHALL THE COPYRIGHT HOLDERS BE LIABLE FOR ANY
- * SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER
- * RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF
- * CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
- * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
  */
 
 #include <config.h>
@@ -69,7 +70,8 @@ START_TEST(device_sendevents_config_touchpad)
 	expected = LIBINPUT_CONFIG_SEND_EVENTS_DISABLED;
 
 	/* The wacom devices in the test suite are external */
-	if (libevdev_get_id_vendor(dev->evdev) != VENDOR_ID_WACOM)
+	if (libevdev_get_id_vendor(dev->evdev) != VENDOR_ID_WACOM &&
+	    libevdev_get_id_bustype(dev->evdev) != BUS_BLUETOOTH)
 		expected |=
 			LIBINPUT_CONFIG_SEND_EVENTS_DISABLED_ON_EXTERNAL_MOUSE;
 
@@ -88,7 +90,8 @@ START_TEST(device_sendevents_config_touchpad_superset)
 	uint32_t modes;
 
 	/* The wacom devices in the test suite are external */
-	if (libevdev_get_id_vendor(dev->evdev) == 0x56a) /* wacom */
+	if (libevdev_get_id_vendor(dev->evdev) == VENDOR_ID_WACOM ||
+	    libevdev_get_id_bustype(dev->evdev) == BUS_BLUETOOTH)
 		return;
 
 	device = dev->libinput_device;
@@ -946,6 +949,65 @@ START_TEST(device_wheel_only)
 }
 END_TEST
 
+START_TEST(device_udev_tag_alps)
+{
+	struct litest_device *dev = litest_current_device();
+	struct libinput_device *device = dev->libinput_device;
+	struct udev_device *d;
+	const char *prop;
+
+	d = libinput_device_get_udev_device(device);
+	prop = udev_device_get_property_value(d,
+					      "LIBINPUT_MODEL_ALPS_TOUCHPAD");
+
+	if (strstr(libinput_device_get_name(device), "ALPS"))
+		ck_assert_notnull(prop);
+	else
+		ck_assert(prop == NULL);
+
+	udev_device_unref(d);
+}
+END_TEST
+
+START_TEST(device_udev_tag_wacom)
+{
+	struct litest_device *dev = litest_current_device();
+	struct libinput_device *device = dev->libinput_device;
+	struct udev_device *d;
+	const char *prop;
+
+	d = libinput_device_get_udev_device(device);
+	prop = udev_device_get_property_value(d,
+					      "LIBINPUT_MODEL_WACOM_TOUCHPAD");
+
+	if (libevdev_get_id_vendor(dev->evdev) == VENDOR_ID_WACOM)
+		ck_assert_notnull(prop);
+	else
+		ck_assert(prop == NULL);
+
+	udev_device_unref(d);
+}
+END_TEST
+
+START_TEST(device_udev_tag_apple)
+{
+	struct litest_device *dev = litest_current_device();
+	struct libinput_device *device = dev->libinput_device;
+	struct udev_device *d;
+	const char *prop;
+
+	d = libinput_device_get_udev_device(device);
+	prop = udev_device_get_property_value(d,
+					      "LIBINPUT_MODEL_WACOM_TOUCHPAD");
+
+	if (libevdev_get_id_vendor(dev->evdev) == VENDOR_ID_WACOM)
+		ck_assert_notnull(prop);
+	else
+		ck_assert(prop == NULL);
+
+	udev_device_unref(d);
+}
+END_TEST
 void
 litest_setup_tests(void)
 {
@@ -988,4 +1050,8 @@ litest_setup_tests(void)
 	litest_add_no_device("device:invalid devices", abs_mt_device_missing_res);
 
 	litest_add("device:wheel", device_wheel_only, LITEST_WHEEL, LITEST_RELATIVE|LITEST_ABSOLUTE);
+
+	litest_add("device:udev tags", device_udev_tag_alps, LITEST_TOUCHPAD, LITEST_ANY);
+	litest_add("device:udev tags", device_udev_tag_wacom, LITEST_TOUCHPAD, LITEST_ANY);
+	litest_add("device:udev tags", device_udev_tag_apple, LITEST_TOUCHPAD, LITEST_ANY);
 }

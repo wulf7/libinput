@@ -2,23 +2,24 @@
  * Copyright © 2013 Jonas Ådahl
  * Copyright © 2013-2015 Red Hat, Inc.
  *
- * Permission to use, copy, modify, distribute, and sell this software and
- * its documentation for any purpose is hereby granted without fee, provided
- * that the above copyright notice appear in all copies and that both that
- * copyright notice and this permission notice appear in supporting
- * documentation, and that the name of the copyright holders not be used in
- * advertising or publicity pertaining to distribution of the software
- * without specific, written prior permission.  The copyright holders make
- * no representations about the suitability of this software for any
- * purpose.  It is provided "as is" without express or implied warranty.
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
  *
- * THE COPYRIGHT HOLDERS DISCLAIM ALL WARRANTIES WITH REGARD TO THIS
- * SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
- * FITNESS, IN NO EVENT SHALL THE COPYRIGHT HOLDERS BE LIABLE FOR ANY
- * SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER
- * RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF
- * CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
- * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
  */
 
 #ifndef LIBINPUT_PRIVATE_H
@@ -116,6 +117,11 @@ struct libinput_device_config_tap {
 						   enum libinput_config_tap_state enable);
 	enum libinput_config_tap_state (*get_enabled)(struct libinput_device *device);
 	enum libinput_config_tap_state (*get_default)(struct libinput_device *device);
+
+	enum libinput_config_status (*set_draglock_enabled)(struct libinput_device *device,
+							    enum libinput_config_drag_lock_state);
+	enum libinput_config_drag_lock_state (*get_draglock_enabled)(struct libinput_device *device);
+	enum libinput_config_drag_lock_state (*get_default_draglock_enabled)(struct libinput_device *device);
 };
 
 struct libinput_device_config_calibration {
@@ -318,7 +324,7 @@ void
 pointer_notify_motion(struct libinput_device *device,
 		      uint64_t time,
 		      const struct normalized_coords *delta,
-		      const struct normalized_coords *unaccel);
+		      const struct device_float_coords *raw);
 
 void
 pointer_notify_motion_absolute(struct libinput_device *device,
@@ -360,6 +366,35 @@ touch_notify_touch_up(struct libinput_device *device,
 		      int32_t seat_slot);
 
 void
+gesture_notify_swipe(struct libinput_device *device,
+		     uint64_t time,
+		     enum libinput_event_type type,
+		     int finger_count,
+		     const struct normalized_coords *delta,
+		     const struct normalized_coords *unaccel);
+
+void
+gesture_notify_swipe_end(struct libinput_device *device,
+			 uint64_t time,
+			 int finger_count,
+			 int cancelled);
+
+void
+gesture_notify_pinch(struct libinput_device *device,
+		     uint64_t time,
+		     enum libinput_event_type type,
+		     const struct normalized_coords *delta,
+		     const struct normalized_coords *unaccel,
+		     double scale,
+		     double angle);
+
+void
+gesture_notify_pinch_end(struct libinput_device *device,
+			 uint64_t time,
+			 double scale,
+			 int cancelled);
+
+void
 touch_notify_frame(struct libinput_device *device,
 		   uint64_t time);
 
@@ -385,6 +420,39 @@ device_delta(struct device_coords a, struct device_coords b)
 	delta.y = a.y - b.y;
 
 	return delta;
+}
+
+static inline struct device_float_coords
+device_average(struct device_coords a, struct device_coords b)
+{
+	struct device_float_coords average;
+
+	average.x = (a.x + b.x) / 2.0;
+	average.y = (a.y + b.y) / 2.0;
+
+	return average;
+}
+
+static inline struct device_float_coords
+device_float_delta(struct device_float_coords a, struct device_float_coords b)
+{
+	struct device_float_coords delta;
+
+	delta.x = a.x - b.x;
+	delta.y = a.y - b.y;
+
+	return delta;
+}
+
+static inline struct device_float_coords
+device_float_average(struct device_float_coords a, struct device_float_coords b)
+{
+	struct device_float_coords average;
+
+	average.x = (a.x + b.x) / 2.0;
+	average.y = (a.y + b.y) / 2.0;
+
+	return average;
 }
 
 static inline double

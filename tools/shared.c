@@ -1,29 +1,31 @@
 /*
  * Copyright © 2014 Red Hat, Inc.
  *
- * Permission to use, copy, modify, distribute, and sell this software and
- * its documentation for any purpose is hereby granted without fee, provided
- * that the above copyright notice appear in all copies and that both that
- * copyright notice and this permission notice appear in supporting
- * documentation, and that the name of the copyright holders not be used in
- * advertising or publicity pertaining to distribution of the software
- * without specific, written prior permission.  The copyright holders make
- * no representations about the suitability of this software for any
- * purpose.  It is provided "as is" without express or implied warranty.
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
  *
- * THE COPYRIGHT HOLDERS DISCLAIM ALL WARRANTIES WITH REGARD TO THIS
- * SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
- * FITNESS, IN NO EVENT SHALL THE COPYRIGHT HOLDERS BE LIABLE FOR ANY
- * SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER
- * RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF
- * CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
- * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
  */
 
 #define _GNU_SOURCE
 #include <config.h>
 
 #include <errno.h>
+#include <fcntl.h>
 #include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,10 +44,13 @@
 enum options {
 	OPT_DEVICE,
 	OPT_UDEV,
+	OPT_GRAB,
 	OPT_HELP,
 	OPT_VERBOSE,
 	OPT_TAP_ENABLE,
 	OPT_TAP_DISABLE,
+	OPT_DRAG_LOCK_ENABLE,
+	OPT_DRAG_LOCK_DISABLE,
 	OPT_NATURAL_SCROLL_ENABLE,
 	OPT_NATURAL_SCROLL_DISABLE,
 	OPT_LEFT_HANDED_ENABLE,
@@ -78,6 +83,8 @@ tools_usage(const char *argv0)
 	       "Features:\n"
 	       "--enable-tap\n"
 	       "--disable-tap.... enable/disable tapping\n"
+	       "--enable-drag-lock\n"
+	       "--disable-drag-lock.... enable/disable tapping drag lock\n"
 	       "--enable-natural-scrolling\n"
 	       "--disable-natural-scrolling.... enable/disable natural scrolling\n"
 	       "--enable-left-handed\n"
@@ -93,16 +100,22 @@ tools_usage(const char *argv0)
 	       "is not explicitly specified it is left at each device's default.\n"
 	       "\n"
 	       "Other options:\n"
+	       "--grab .......... Exclusively grab all openend devices\n"
 	       "--verbose ....... Print debugging output.\n"
 	       "--help .......... Print this help.\n",
 		argv0);
 }
 
 void
-tools_init_options(struct tools_options *options)
+tools_init_context(struct tools_context *context)
 {
+	struct tools_options *options = &context->options;
+
+	context->user_data = NULL;
+
 	memset(options, 0, sizeof(*options));
 	options->tapping = -1;
+	options->drag_lock = -1;
 	options->natural_scroll = -1;
 	options->left_handed = -1;
 	options->middlebutton = -1;
@@ -115,18 +128,23 @@ tools_init_options(struct tools_options *options)
 }
 
 int
-tools_parse_args(int argc, char **argv, struct tools_options *options)
+tools_parse_args(int argc, char **argv, struct tools_context *context)
 {
+	struct tools_options *options = &context->options;
+
 	while (1) {
 		int c;
 		int option_index = 0;
 		static struct option opts[] = {
 			{ "device", 1, 0, OPT_DEVICE },
 			{ "udev", 0, 0, OPT_UDEV },
+			{ "grab", 0, 0, OPT_GRAB },
 			{ "help", 0, 0, OPT_HELP },
 			{ "verbose", 0, 0, OPT_VERBOSE },
 			{ "enable-tap", 0, 0, OPT_TAP_ENABLE },
 			{ "disable-tap", 0, 0, OPT_TAP_DISABLE },
+			{ "enable-drag-lock", 0, 0, OPT_DRAG_LOCK_ENABLE },
+			{ "disable-drag-lock", 0, 0, OPT_DRAG_LOCK_DISABLE },
 			{ "enable-natural-scrolling", 0, 0, OPT_NATURAL_SCROLL_ENABLE },
 			{ "disable-natural-scrolling", 0, 0, OPT_NATURAL_SCROLL_DISABLE },
 			{ "enable-left-handed", 0, 0, OPT_LEFT_HANDED_ENABLE },
@@ -145,11 +163,11 @@ tools_parse_args(int argc, char **argv, struct tools_options *options)
 			break;
 
 		switch(c) {
-			case 'h': /* --help */
+			case 'h':
 			case OPT_HELP:
 				tools_usage(argv[0]);
 				exit(0);
-			case OPT_DEVICE: /* --device */
+			case OPT_DEVICE:
 				options->backend = BACKEND_DEVICE;
 				if (!optarg) {
 					tools_usage(argv[0]);
@@ -157,12 +175,15 @@ tools_parse_args(int argc, char **argv, struct tools_options *options)
 				}
 				options->device = optarg;
 				break;
-			case OPT_UDEV: /* --udev */
+			case OPT_UDEV:
 				options->backend = BACKEND_UDEV;
 				if (optarg)
 					options->seat = optarg;
 				break;
-			case OPT_VERBOSE: /* --verbose */
+			case OPT_GRAB:
+				options->grab = 1;
+				break;
+			case OPT_VERBOSE:
 				options->verbose = 1;
 				break;
 			case OPT_TAP_ENABLE:
@@ -170,6 +191,12 @@ tools_parse_args(int argc, char **argv, struct tools_options *options)
 				break;
 			case OPT_TAP_DISABLE:
 				options->tapping = 0;
+				break;
+			case OPT_DRAG_LOCK_ENABLE:
+				options->drag_lock = 1;
+				break;
+			case OPT_DRAG_LOCK_DISABLE:
+				options->drag_lock = 0;
 				break;
 			case OPT_NATURAL_SCROLL_ENABLE:
 				options->natural_scroll = 1;
@@ -334,17 +361,44 @@ open_device(const struct libinput_interface *interface,
 	return li;
 }
 
+static int
+open_restricted(const char *path, int flags, void *user_data)
+{
+	const struct tools_context *context = user_data;
+	int fd = open(path, flags);
+
+	if (fd < 0)
+		fprintf(stderr, "Failed to open %s (%s)\n",
+			path, strerror(errno));
+	else if (context->options.grab &&
+		 ioctl(fd, EVIOCGRAB, (void*)1) == -1)
+		fprintf(stderr, "Grab requested, but failed for %s (%s)\n",
+			path, strerror(errno));
+
+	return fd < 0 ? -errno : fd;
+}
+
+static void
+close_restricted(int fd, void *user_data)
+{
+	close(fd);
+}
+
+static const struct libinput_interface interface = {
+	.open_restricted = open_restricted,
+	.close_restricted = close_restricted,
+};
+
 struct libinput *
-tools_open_backend(struct tools_options *options,
-		   void *userdata,
-		   const struct libinput_interface *interface)
+tools_open_backend(struct tools_context *context)
 {
 	struct libinput *li = NULL;
+	struct tools_options *options = &context->options;
 
 	if (options->backend == BACKEND_UDEV) {
-		li = open_udev(interface, userdata, options->seat, options->verbose);
+		li = open_udev(&interface, context, options->seat, options->verbose);
 	} else if (options->backend == BACKEND_DEVICE) {
-		li = open_device(interface, userdata, options->device, options->verbose);
+		li = open_device(&interface, context, options->device, options->verbose);
 	} else
 		abort();
 
@@ -357,6 +411,9 @@ tools_device_apply_config(struct libinput_device *device,
 {
 	if (options->tapping != -1)
 		libinput_device_config_tap_set_enabled(device, options->tapping);
+	if (options->drag_lock != -1)
+		libinput_device_config_tap_set_drag_lock_enabled(device,
+								 options->drag_lock);
 	if (options->natural_scroll != -1)
 		libinput_device_config_scroll_set_natural_scroll_enabled(device,
 									 options->natural_scroll);

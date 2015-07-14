@@ -3,23 +3,24 @@
  * Copyright © 2012 Jonas Ådahl
  * Copyright © 2014-2015 Red Hat, Inc.
  *
- * Permission to use, copy, modify, distribute, and sell this software and
- * its documentation for any purpose is hereby granted without fee, provided
- * that the above copyright notice appear in all copies and that both that
- * copyright notice and this permission notice appear in supporting
- * documentation, and that the name of the copyright holders not be used in
- * advertising or publicity pertaining to distribution of the software
- * without specific, written prior permission.  The copyright holders make
- * no representations about the suitability of this software for any
- * purpose.  It is provided "as is" without express or implied warranty.
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
  *
- * THE COPYRIGHT HOLDERS DISCLAIM ALL WARRANTIES WITH REGARD TO THIS
- * SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
- * FITNESS, IN NO EVENT SHALL THE COPYRIGHT HOLDERS BE LIABLE FOR ANY
- * SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER
- * RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF
- * CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
- * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
  */
 
 #include "config.h"
@@ -41,6 +42,13 @@ filter_dispatch(struct motion_filter *filter,
 		void *data, uint64_t time)
 {
 	return filter->interface->filter(filter, unaccelerated, data, time);
+}
+
+void
+filter_restart(struct motion_filter *filter,
+	       void *data, uint64_t time)
+{
+	filter->interface->restart(filter, data, time);
 }
 
 void
@@ -103,6 +111,8 @@ struct pointer_accelerator {
 	double threshold;	/* units/ms */
 	double accel;		/* unitless factor */
 	double incline;		/* incline of the function */
+
+	double dpi_factor;
 };
 
 static void
@@ -254,8 +264,16 @@ accelerator_filter(struct motion_filter *filter,
 	double velocity; /* units/ms */
 	double accel_value; /* unitless factor */
 	struct normalized_coords accelerated;
+	struct normalized_coords unnormalized;
+	double dpi_factor = accel->dpi_factor;
 
-	feed_trackers(accel, unaccelerated, time);
+	/* For low-dpi mice, use device units, everything else uses
+	   1000dpi normalized */
+	dpi_factor = min(1.0, dpi_factor);
+	unnormalized.x = unaccelerated->x * dpi_factor;
+	unnormalized.y = unaccelerated->y * dpi_factor;
+
+	feed_trackers(accel, &unnormalized, time);
 	velocity = calculate_velocity(accel, time);
 	accel_value = calculate_acceleration(accel,
 					     data,
@@ -263,14 +281,37 @@ accelerator_filter(struct motion_filter *filter,
 					     accel->last_velocity,
 					     time);
 
-	accelerated.x = accel_value * unaccelerated->x;
-	accelerated.y = accel_value * unaccelerated->y;
+	accelerated.x = accel_value * unnormalized.x;
+	accelerated.y = accel_value * unnormalized.y;
 
-	accel->last = *unaccelerated;
+	accel->last = unnormalized;
 
 	accel->last_velocity = velocity;
 
 	return accelerated;
+}
+
+static void
+accelerator_restart(struct motion_filter *filter,
+		    void *data,
+		    uint64_t time)
+{
+	struct pointer_accelerator *accel =
+		(struct pointer_accelerator *) filter;
+	unsigned int offset;
+	struct pointer_tracker *tracker;
+
+	for (offset = 1; offset < NUM_POINTER_TRACKERS; offset++) {
+		tracker = tracker_by_offset(accel, offset);
+		tracker->time = 0;
+		tracker->dir = 0;
+		tracker->delta.x = 0;
+		tracker->delta.y = 0;
+	}
+
+	tracker = tracker_by_offset(accel, 0);
+	tracker->time = time;
+	tracker->dir = UNDEFINED_DIRECTION;
 }
 
 static void
@@ -309,12 +350,14 @@ accelerator_set_speed(struct motion_filter *filter,
 
 struct motion_filter_interface accelerator_interface = {
 	accelerator_filter,
+	accelerator_restart,
 	accelerator_destroy,
 	accelerator_set_speed,
 };
 
 struct motion_filter *
-create_pointer_accelerator_filter(accel_profile_func_t profile)
+create_pointer_accelerator_filter(accel_profile_func_t profile,
+				  int dpi)
 {
 	struct pointer_accelerator *filter;
 
@@ -337,13 +380,51 @@ create_pointer_accelerator_filter(accel_profile_func_t profile)
 	filter->accel = DEFAULT_ACCELERATION;
 	filter->incline = DEFAULT_INCLINE;
 
+	filter->dpi_factor = dpi/(double)DEFAULT_MOUSE_DPI;
+
 	return &filter->base;
+}
+
+/**
+ * Custom acceleration function for mice < 1000dpi.
+ * At slow motion, a single device unit causes a one-pixel movement.
+ * The threshold/max accel depends on the DPI, the smaller the DPI the
+ * earlier we accelerate and the higher the maximum acceleration is. Result:
+ * at low speeds we get pixel-precision, at high speeds we get approx. the
+ * same movement as a high-dpi mouse.
+ *
+ * Note: data fed to this function is in device units, not normalized.
+ */
+double
+pointer_accel_profile_linear_low_dpi(struct motion_filter *filter,
+				     void *data,
+				     double speed_in, /* in device units */
+				     uint64_t time)
+{
+	struct pointer_accelerator *accel_filter =
+		(struct pointer_accelerator *)filter;
+
+	double s1, s2;
+	double max_accel = accel_filter->accel; /* unitless factor */
+	const double threshold = accel_filter->threshold; /* units/ms */
+	const double incline = accel_filter->incline;
+	double factor;
+	double dpi_factor = accel_filter->dpi_factor;
+
+	max_accel /= dpi_factor;
+
+	s1 = min(1, 0.3 + speed_in * 10);
+	s2 = 1 + (speed_in - threshold * dpi_factor) * incline;
+
+	factor = min(max_accel, s2 > 1 ? s2 : s1);
+
+	return factor;
 }
 
 double
 pointer_accel_profile_linear(struct motion_filter *filter,
 			     void *data,
-			     double speed_in,
+			     double speed_in, /* 1000-dpi normalized */
 			     uint64_t time)
 {
 	struct pointer_accelerator *accel_filter =
@@ -353,11 +434,14 @@ pointer_accel_profile_linear(struct motion_filter *filter,
 	const double max_accel = accel_filter->accel; /* unitless factor */
 	const double threshold = accel_filter->threshold; /* units/ms */
 	const double incline = accel_filter->incline;
+	double factor;
 
-	s1 = min(1, speed_in * 5);
+	s1 = min(1, 0.3 + speed_in * 10);
 	s2 = 1 + (speed_in - threshold) * incline;
 
-	return min(max_accel, s2 > 1 ? s2 : s1);
+	factor =  min(max_accel, s2 > 1 ? s2 : s1);
+
+	return factor;
 }
 
 double

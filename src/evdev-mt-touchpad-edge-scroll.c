@@ -1,23 +1,24 @@
 /*
  * Copyright © 2014-2015 Red Hat, Inc.
  *
- * Permission to use, copy, modify, distribute, and sell this software and
- * its documentation for any purpose is hereby granted without fee, provided
- * that the above copyright notice appear in all copies and that both that
- * copyright notice and this permission notice appear in supporting
- * documentation, and that the name of the copyright holders not be used in
- * advertising or publicity pertaining to distribution of the software
- * without specific, written prior permission.  The copyright holders make
- * no representations about the suitability of this software for any
- * purpose.  It is provided "as is" without express or implied warranty.
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
  *
- * THE COPYRIGHT HOLDERS DISCLAIM ALL WARRANTIES WITH REGARD TO THIS
- * SOFTWARE, INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
- * FITNESS, IN NO EVENT SHALL THE COPYRIGHT HOLDERS BE LIABLE FOR ANY
- * SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER
- * RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF
- * CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
- * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ * DEALINGS IN THE SOFTWARE.
  */
 
 #include "config.h"
@@ -33,12 +34,11 @@
 
 #define CASE_RETURN_STRING(a) case a: return #a
 
-#define DEFAULT_SCROLL_LOCK_TIMEOUT 300 /* ms */
 /* Use a reasonably large threshold until locked into scrolling mode, to
    avoid accidentally locking in scrolling mode when trying to use the entire
    touchpad to move the pointer. The user can wait for the timeout to trigger
    to do a small scroll. */
-#define DEFAULT_SCROLL_THRESHOLD TP_MM_TO_DPI_NORMALIZED(5)
+#define DEFAULT_SCROLL_THRESHOLD TP_MM_TO_DPI_NORMALIZED(3)
 
 enum scroll_event {
 	SCROLL_EVENT_TOUCH,
@@ -74,7 +74,7 @@ edge_event_to_str(enum scroll_event event)
 	return NULL;
 }
 
-static uint32_t
+uint32_t
 tp_touch_get_edge(struct tp_dispatch *tp, struct tp_touch *t)
 {
 	uint32_t edge = EDGE_NONE;
@@ -89,6 +89,23 @@ tp_touch_get_edge(struct tp_dispatch *tp, struct tp_touch *t)
 		edge |= EDGE_BOTTOM;
 
 	return edge;
+}
+
+static inline void
+tp_edge_scroll_set_timer(struct tp_dispatch *tp,
+			 struct tp_touch *t)
+{
+	const int DEFAULT_SCROLL_LOCK_TIMEOUT = 300; /* ms */
+	/* if we use software buttons, we disable timeout-based
+	 * edge scrolling. A finger resting on the button areas is
+	 * likely there to trigger a button event.
+	 */
+	if (tp->buttons.click_method ==
+	    LIBINPUT_CONFIG_CLICK_METHOD_BUTTON_AREAS)
+		return;
+
+	libinput_timer_set(&t->scroll.timer,
+			   t->millis + DEFAULT_SCROLL_LOCK_TIMEOUT);
 }
 
 static void
@@ -107,8 +124,7 @@ tp_edge_scroll_set_state(struct tp_dispatch *tp,
 	case EDGE_SCROLL_TOUCH_STATE_EDGE_NEW:
 		t->scroll.edge = tp_touch_get_edge(tp, t);
 		t->scroll.initial = t->point;
-		libinput_timer_set(&t->scroll.timer,
-				   t->millis + DEFAULT_SCROLL_LOCK_TIMEOUT);
+		tp_edge_scroll_set_timer(tp, t);
 		break;
 	case EDGE_SCROLL_TOUCH_STATE_EDGE:
 		break;
@@ -274,8 +290,8 @@ tp_edge_scroll_init(struct tp_dispatch *tp, struct evdev_device *device)
 	int width, height;
 	int edge_width, edge_height;
 
-	width = device->abs.absinfo_x->maximum - device->abs.absinfo_x->minimum;
-	height = device->abs.absinfo_y->maximum - device->abs.absinfo_y->minimum;
+	width = device->abs.dimensions.x;
+	height = device->abs.dimensions.y;
 
 	switch (tp->model) {
 	case MODEL_ALPS:
@@ -289,8 +305,7 @@ tp_edge_scroll_init(struct tp_dispatch *tp, struct evdev_device *device)
 	default:
 		/* For elantech and synaptics, note for lenovo #40 series,
 		 * e.g. the T440s min/max are the absolute edges, not the
-		 * recommended ones as usual with synaptics. But these are
-		 * clickpads, so N/A.
+		 * recommended ones as usual with synaptics.
 		 */
 		edge_width = width * .04;
 		edge_height = height * .054;
@@ -352,7 +367,7 @@ tp_edge_scroll_post_events(struct tp_dispatch *tp, uint64_t time)
 	struct tp_touch *t;
 	enum libinput_pointer_axis axis;
 	double *delta;
-	struct normalized_coords normalized;
+	struct normalized_coords normalized, tmp;
 	const struct normalized_coords zero = { 0.0, 0.0 };
 	const struct discrete_coords zero_discrete = { 0.0, 0.0 };
 
@@ -401,11 +416,14 @@ tp_edge_scroll_post_events(struct tp_dispatch *tp, uint64_t time)
 					 t->scroll.edge_state);
 			break;
 		case EDGE_SCROLL_TOUCH_STATE_EDGE_NEW:
+			tmp = normalized;
 			normalized = tp_normalize_delta(tp,
 					device_delta(t->point,
 						     t->scroll.initial));
 			if (fabs(*delta) < DEFAULT_SCROLL_THRESHOLD)
 				normalized = zero;
+			else
+				normalized = tmp;
 			break;
 		case EDGE_SCROLL_TOUCH_STATE_EDGE:
 			break;
