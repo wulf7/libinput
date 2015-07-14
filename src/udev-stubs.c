@@ -1,5 +1,6 @@
 #include "udev-stubs.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <libevdev/libevdev.h>
@@ -258,14 +259,26 @@ LIBINPUT_EXPORT
 int udev_enumerate_scan_devices(struct udev_enumerate *udev_enumerate) {
   fprintf(stderr, "udev_enumerate_scan_devices\n");
 
+  DIR *dir;
+  struct dirent *ent;
   char path[32];
 
-  for (int i = 0; i < 10; ++i) {
-    snprintf(path, sizeof(path), "/dev/input/event%d", i);
+  dir = opendir("/dev/input");
+  if (dir == NULL) {
+    return -1;
+  }
+  while ((ent = readdir(dir)) != NULL) {
+    if (!strcmp(ent->d_name, ".") || !strcmp(ent->d_name, "..") ||
+        ent->d_type != DT_CHR || strncmp(ent->d_name, "event", 5) != 0) {
+      continue;
+    }
+
+    snprintf(path, sizeof(path), "/dev/input/%s", ent->d_name);
 
     struct udev_list_entry *le = create_list_entry(path);
     if (!le) {
       free_dev_list(&udev_enumerate->dev_list);
+      closedir(dir);
       return -1;
     }
 
@@ -274,9 +287,10 @@ int udev_enumerate_scan_devices(struct udev_enumerate *udev_enumerate) {
       list_end = &((*list_end)->next);
     }
 
-    (*list_end)->next = le;
+    *list_end = le;
   }
 
+  closedir(dir);
   return 0;
 }
 
