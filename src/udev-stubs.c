@@ -12,18 +12,17 @@ struct udev_device *udev_device_new_from_devnum(struct udev *udev, char type,
                                                 dev_t devnum) {
   fprintf(stderr, "udev_device_new_from_devnum %d\n", (int) devnum);
 
-  char path[32];
+  char path[32] = "/dev/";
   struct stat st;
 
-  for (int i = 0; i < 10; ++i) {
-    snprintf(path, sizeof(path), "/dev/input/event%d", i);
+  devname_r(devnum, S_IFCHR, path + 5, sizeof(path) - 5);
 
-    fprintf(stderr, "path: %s\n", path);
+  fprintf(stderr, "path: %s\n", path);
 
-    if (stat(path, &st) == 0 && st.st_rdev == devnum) {
-      fprintf(stderr, "  %s\n", path + 11);
-      return udev_device_new_from_syspath(udev, path);
-    }
+  /* Recheck path as devname_r returns zero-terminated garbage on error */
+  if (stat(path, &st) == 0 && st.st_rdev == devnum) {
+    fprintf(stderr, "  %s\n", path + 11);
+    return udev_device_new_from_syspath(udev, path);
   }
 
   return NULL;
