@@ -34,10 +34,11 @@
 #include <unistd.h>
 #ifdef __linux__
 #include <libudev.h>
+#include "linux/input.h"
 #else
 #include "udev-stubs.h"
+#include <dev/evdev/input.h>
 #endif
-#include "linux/input.h"
 #include <sys/ioctl.h>
 
 #include <libevdev/libevdev.h>

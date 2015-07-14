@@ -32,7 +32,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#ifdef __linux__
 #include "linux/input.h"
+#else
+#include <dev/evdev/input.h>
+#endif
 #include <unistd.h>
 #include <fcntl.h>
 #ifdef __linux__

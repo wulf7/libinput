@@ -28,7 +28,11 @@
 #include <math.h>
 #include <string.h>
 #include <unistd.h>
+#ifdef __linux__
 #include "linux/input.h"
+#else
+#include <dev/evdev/input.h>
+#endif
 
 #include "evdev-mt-touchpad.h"
 

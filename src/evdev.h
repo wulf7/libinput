@@ -29,7 +29,11 @@
 #include "config.h"
 
 #include <stdbool.h>
+#ifdef __linux__
 #include "linux/input.h"
+#else
+#include <dev/evdev/input.h>
+#endif
 #include <libevdev/libevdev.h>
 
 #include "libinput-private.h"

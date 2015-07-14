@@ -28,7 +28,11 @@
 #include <errno.h>
 #include <math.h>
 
+#ifdef __linux__
 #include "linux/input.h"
+#else
+#include <dev/evdev/input.h>
+#endif
 
 #include "libinput.h"
 #include "libinput-util.h"
