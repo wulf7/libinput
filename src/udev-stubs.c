@@ -92,6 +92,17 @@ char const *udev_device_get_property_value(struct udev_device *dev,
         !libevdev_has_event_code(evdev, EV_KEY, BTN_TOOL_PEN)) {
       retval = (char const *)1;
     }
+  } else if (strcmp("ID_INPUT_TOUCHSCREEN", property) == 0) {
+    /* Its not rule of thumb but quite common that
+     * touchscreens do not advertise BTN_TOOL_FINGER event */
+    if (libevdev_has_event_code(evdev, EV_ABS, ABS_X) &&
+        libevdev_has_event_code(evdev, EV_ABS, ABS_Y) &&
+        libevdev_has_event_code(evdev, EV_KEY, BTN_TOUCH) &&
+        !libevdev_has_event_code(evdev, EV_KEY, BTN_TOOL_FINGER) &&
+        !libevdev_has_event_code(evdev, EV_KEY, BTN_STYLUS) &&
+        !libevdev_has_event_code(evdev, EV_KEY, BTN_TOOL_PEN)) {
+      retval = (char const *)1;
+    }
   } else if (strcmp("ID_INPUT_MOUSE", property) == 0) {
     if (libevdev_has_event_code(evdev, EV_REL, REL_X) &&
         libevdev_has_event_code(evdev, EV_REL, REL_Y) &&
