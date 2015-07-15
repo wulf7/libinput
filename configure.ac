@@ -46,6 +46,31 @@ AC_PROG_GREP
 LT_PREREQ([2.2])
 LT_INIT
 
+AC_CHECK_DECL(EPOLL_CLOEXEC,
+             [HAVE_EPOLL_H=yes],
+             [HAVE_EPOLL_H=no],
+             [[#include <sys/epoll.h>]])
+if test "x$HAVE_EPOLL_H" = "xyes"; then
+	AC_DEFINE(HAVE_EPOLL_H, 1, [Have epoll support])
+fi
+AC_CHECK_DECL(TFD_CLOEXEC,
+             [HAVE_TIMERFD_H=yes],
+             [HAVE_TIMERFD_H=no],
+             [[#include <sys/timerfd.h>]])
+if test "x$HAVE_TIMERFD_H" = "xyes"; then
+	AC_DEFINE(HAVE_TIMERFD_H, 1, [Have timerfd support])
+fi
+AC_CHECK_DECL(EVFILT_TIMER,
+             [HAVE_KQUEUE=yes],
+             [HAVE_KQUEUE=no],
+             [[#include <sys/types.h>]
+              [#include <sys/event.h>]])
+if test "x$HAVE_KQUEUE" = "xyes"; then
+	AC_DEFINE(HAVE_KQUEUE, 1, [Have kqueue support])
+fi
+if test \( "x$HAVE_EPOLL_H" = "xno" -o "x$HAVE_TIMERFD_H" = "xno" \) -a "x$HAVE_KQUEUE" = "xno"; then
+	AC_MSG_ERROR("epoll&timerfd or kqueue is needed to compile libinput")
+fi
 AC_CHECK_DECL(CLOCK_MONOTONIC,[],
 	      [AC_MSG_ERROR("CLOCK_MONOTONIC is needed to compile libinput")],
 	      [[#include <time.h>]])

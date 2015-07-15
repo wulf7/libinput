@@ -28,7 +28,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef __linux__
+#ifdef HAVE_EPOLL_H
 #include <sys/epoll.h>
 #else
 #include <sys/types.h>
@@ -821,7 +821,7 @@ libinput_add_fd(struct libinput *libinput,
 	source->user_data = user_data;
 	source->fd = fd;
 
-#ifdef __linux__
+#ifdef HAVE_EPOLL_H
 	struct epoll_event ep;
 
 	memset(&ep, 0, sizeof ep);
@@ -852,7 +852,7 @@ void
 libinput_remove_source(struct libinput *libinput,
 		       struct libinput_source *source)
 {
-#ifdef __linux__
+#ifdef HAVE_EPOLL_H
 	epoll_ctl(libinput->epoll_fd, EPOLL_CTL_DEL, source->fd, NULL);
 #else
 	struct kevent evlist[1];
@@ -869,7 +869,7 @@ libinput_init(struct libinput *libinput,
 	      const struct libinput_interface_backend *interface_backend,
 	      void *user_data)
 {
-#ifdef __linux__
+#ifdef HAVE_EPOLL_H
 	libinput->epoll_fd = epoll_create1(EPOLL_CLOEXEC);;
 #else
 	libinput->epoll_fd = kqueue();
@@ -1116,7 +1116,7 @@ libinput_dispatch(struct libinput *libinput)
 	struct libinput_source *source;
 	int i, count;
 
-#ifdef __linux__
+#ifdef HAVE_EPOLL_H
 	struct epoll_event ep[32];
 	count = epoll_wait(libinput->epoll_fd, ep, ARRAY_LENGTH(ep), 0);
 #else
@@ -1129,7 +1129,7 @@ libinput_dispatch(struct libinput *libinput)
 		return -errno;
 
 	for (i = 0; i < count; ++i) {
-#ifdef __linux__
+#ifdef HAVE_EPOLL_H
 		source = ep[i].data.ptr;
 #else
 		source = evlist[i].udata;

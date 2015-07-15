@@ -28,7 +28,7 @@
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
-#ifdef __linux__
+#ifdef HAVE_TIMERFD_H
 #include <sys/timerfd.h>
 #else
 #include <sys/types.h>
@@ -60,7 +60,7 @@ libinput_timer_arm_timer_fd(struct libinput *libinput)
 			earliest_expire = timer->expire;
 	}
 
-#ifdef __linux__
+#ifdef HAVE_TIMERFD_H
 	int r;
 	struct itimerspec its = { { 0, 0 }, { 0, 0 } };
 	if (earliest_expire != UINT64_MAX) {
@@ -157,7 +157,7 @@ libinput_timer_handler(void *data)
 int
 libinput_timer_subsys_init(struct libinput *libinput)
 {
-#ifdef __linux__
+#ifdef HAVE_TIMERFD_H
 	libinput->timer.fd = timerfd_create(CLOCK_MONOTONIC,
 					    TFD_CLOEXEC | TFD_NONBLOCK);
 	if (libinput->timer.fd < 0)
@@ -187,7 +187,7 @@ libinput_timer_subsys_destroy(struct libinput *libinput)
 	assert(list_empty(&libinput->timer.list));
 
 	libinput_remove_source(libinput, libinput->timer.source);
-#ifdef __linux__
+#ifdef HAVE_TIMERFD_H
 	close(libinput->timer.fd);
 #endif
 }
