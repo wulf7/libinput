@@ -10,5 +10,5 @@ Description: Input device library
 Version: @LIBINPUT_VERSION@
 Cflags: -I${includedir}
 Libs: -L${libdir} -linput
-Libs.private: -lm -lrt
+Libs.private: @LIBS@
 Requires.private: libudev

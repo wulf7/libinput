@@ -92,7 +92,7 @@ if test "x$ADDR2LINE" != "x"; then
 fi
 
 AC_CHECK_LIB([m], [atan2])
-AC_CHECK_LIB([rt], [clock_gettime])
+AC_SEARCH_LIBS([clock_gettime], [rt])
 
 if test "x$GCC" = "xyes"; then
 	GCC_CXXFLAGS="-Wall -Wextra -Wno-unused-parameter -g -fvisibility=hidden"
