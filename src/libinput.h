@@ -34,7 +34,9 @@ extern "C" {
 #ifdef __linux__
 #include <libudev.h>
 #else
-#include "udev-stubs.h"
+#include <stdio.h>
+struct udev;
+struct udev_device;
 #endif
 
 #define LIBINPUT_ATTRIBUTE_PRINTF(_format, _args) \

@@ -32,6 +32,7 @@
 #include "linux/input.h"
 #else
 #include <dev/evdev/input.h>
+#include "udev-stubs.h"
 #endif
 
 #include "libinput.h"
