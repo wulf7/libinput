@@ -50,6 +50,9 @@ case "$host_os" in
 *linux*)
 	opsys=linux
 	;;
+*freebsd*)
+	opsys=freebsd
+	;;
 *)
 	opsys=$host_os
 	;;
@@ -84,9 +87,18 @@ AC_CHECK_DECL(CLOCK_MONOTONIC,[],
 	      [AC_MSG_ERROR("CLOCK_MONOTONIC is needed to compile libinput")],
 	      [[#include <time.h>]])
 
+
 PKG_PROG_PKG_CONFIG()
 if test "x$opsys" = "xlinux"; then
 	PKG_CHECK_MODULES(LIBUDEV, [libudev])
+fi
+if test "x$opsys" = "xfreebsd"; then
+	AC_CHECK_HEADERS([libprocstat.h],
+                         [AC_SEARCH_LIBS([procstat_open_sysctl], [procstat])],
+                         [],
+                         [#include <sys/param.h>
+                          #include <sys/queue.h>
+                          #include <sys/socket.h>])
 fi
 PKG_CHECK_MODULES(LIBEVDEV, [libevdev >= 0.4])
 PKG_CHECK_MODULES(LIBUNWIND,

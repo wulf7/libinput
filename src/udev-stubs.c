@@ -1,9 +1,19 @@
+#include "config.h"
 #include "udev-stubs.h"
 
 #include <dirent.h>
 #include <errno.h>
 #include <stdbool.h>
 #include <libevdev/libevdev.h>
+
+#ifdef HAVE_LIBPROCSTAT_H
+#include <sys/sysctl.h>
+#include <sys/param.h>
+#include <sys/queue.h>
+#include <sys/socket.h>
+#include <kvm.h>
+#include <libprocstat.h>
+#endif
 
 #include "libinput-util.h"
 
@@ -35,29 +45,59 @@ char const *udev_device_get_devnode(struct udev_device *udev_device) {
   return udev_device->syspath;
 }
 
-LIBINPUT_EXPORT
-char const *udev_device_get_property_value(struct udev_device *dev,
-                                           char const *property) {
-  fprintf(stderr, "stub: udev_device_get_property_value %s\n", property);
+static int
+path_to_fd(const char *path) {
+  int fd = -1;
 
-  if (strcmp("ID_INPUT", property) == 0) {
-    fprintf(stderr, "udev_device_get_property_value return 1\n");
-    return (char const *)1;
+#ifdef HAVE_LIBPROCSTAT_H
+  struct procstat *procstat;
+  struct kinfo_proc *kip;
+  struct filestat_list *head = NULL;
+  struct filestat *fst;
+  unsigned int count;
+
+  procstat = procstat_open_sysctl();
+  if (procstat == NULL)
+    return -1;
+
+  count = 0;
+  kip = procstat_getprocs(procstat, KERN_PROC_PID, getpid(), &count);
+  if (kip == NULL || count != 1)
+    goto out;
+
+  head = procstat_getfiles(procstat, kip, 0);
+  if (head == NULL)
+    goto out;
+
+  STAILQ_FOREACH(fst, head, next) {
+    if (fst->fs_uflags == 0 &&
+        fst->fs_type == PS_FST_TYPE_VNODE &&
+        fst->fs_path != NULL &&
+        strcmp(fst->fs_path, path) == 0) {
+      fd = fst->fs_fd;
+      break;
+    }
   }
 
+out:
+  if (head != NULL)
+    procstat_freefiles(procstat, head);
+  if (kip != NULL)
+    procstat_freeprocs(procstat, kip);
+  procstat_close(procstat);
+#else
   struct stat st;
-  if (stat(dev->syspath, &st) != 0) {
-    return NULL;
+  if (stat(path, &st) != 0) {
+    return -1;
   }
 
-  int fd;
   int max_fd = 128;
   for (fd = 0; fd < max_fd; ++fd) {
     struct stat fst;
     if (fstat(fd, &fst) != 0) {
       if (errno != EBADF) {
         perror("fstat");
-        return NULL;
+        return -1;
       } else {
         continue;
       }
@@ -72,8 +112,25 @@ char const *udev_device_get_property_value(struct udev_device *dev,
 
   if (fd == max_fd) {
     // fprintf(stderr, "udev_device_get_property_value: MAX fd reached\n");
-    return NULL;
+    return -1;
   }
+#endif
+  return fd;
+}
+
+LIBINPUT_EXPORT
+char const *udev_device_get_property_value(struct udev_device *dev,
+                                           char const *property) {
+  fprintf(stderr, "stub: udev_device_get_property_value %s\n", property);
+
+  if (strcmp("ID_INPUT", property) == 0) {
+    fprintf(stderr, "udev_device_get_property_value return 1\n");
+    return (char const *)1;
+  }
+
+  int fd = path_to_fd(dev->syspath);
+  if (fd == -1)
+    return NULL;
 
   char const *retval = NULL;
 
