@@ -46,6 +46,15 @@ AC_PROG_GREP
 LT_PREREQ([2.2])
 LT_INIT
 
+case "$host_os" in
+*linux*)
+	opsys=linux
+	;;
+*)
+	opsys=$host_os
+	;;
+esac
+
 AC_CHECK_DECL(EPOLL_CLOEXEC,
              [HAVE_EPOLL_H=yes],
              [HAVE_EPOLL_H=no],
@@ -76,6 +85,9 @@ AC_CHECK_DECL(CLOCK_MONOTONIC,[],
 	      [[#include <time.h>]])
 
 PKG_PROG_PKG_CONFIG()
+if test "x$opsys" = "xlinux"; then
+	PKG_CHECK_MODULES(LIBUDEV, [libudev])
+fi
 PKG_CHECK_MODULES(LIBEVDEV, [libevdev >= 0.4])
 PKG_CHECK_MODULES(LIBUNWIND,
 		  [libunwind],
