@@ -92,6 +92,7 @@ PKG_PROG_PKG_CONFIG()
 if test "x$opsys" = "xlinux"; then
 	PKG_CHECK_MODULES(LIBUDEV, [libudev])
 fi
+HAVE_LIBDEVQ="no"
 if test "x$opsys" = "xfreebsd"; then
 	AC_CHECK_HEADERS([libprocstat.h],
                          [AC_SEARCH_LIBS([procstat_open_sysctl], [procstat])],
@@ -99,6 +100,11 @@ if test "x$opsys" = "xfreebsd"; then
                          [#include <sys/param.h>
                           #include <sys/queue.h>
                           #include <sys/socket.h>])
+	PKG_CHECK_MODULES(LIBDEVQ, [libdevq-1.0], [HAVE_LIBDEVQ="yes"])
+fi
+if test "x$HAVE_LIBDEVQ" = "xyes"; then
+	AC_DEFINE(HAVE_LIBDEVQ, 1, [Have libdevq support])
+	LDFLAGS="$LDFLAGS -pthread"
 fi
 PKG_CHECK_MODULES(LIBEVDEV, [libevdev >= 0.4])
 PKG_CHECK_MODULES(LIBUNWIND,

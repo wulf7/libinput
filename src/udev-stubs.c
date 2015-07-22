@@ -15,6 +15,12 @@
 #include <libprocstat.h>
 #endif
 
+#ifdef HAVE_LIBDEVQ
+#include <libdevq.h>
+#include <sys/types.h>
+#include <sys/event.h>
+#endif
+
 #include "libinput-util.h"
 
 
@@ -41,7 +47,7 @@ struct udev_device *udev_device_new_from_devnum(struct udev *udev, char type,
 
 LIBINPUT_EXPORT
 char const *udev_device_get_devnode(struct udev_device *udev_device) {
-  fprintf(stderr, "udev_device_get_devnode\n");
+  fprintf(stderr, "udev_device_get_devnode return %s\n", udev_device->syspath);
   return udev_device->syspath;
 }
 
@@ -208,6 +214,7 @@ struct udev_device *udev_device_new_from_syspath(struct udev *udev,
   if (u) {
     u->refcount = 1;
     snprintf(u->syspath, sizeof(u->syspath), "%s", syspath);
+    snprintf(u->action, sizeof(u->action), "none");
     return u;
   }
   return NULL;
@@ -385,6 +392,102 @@ void udev_enumerate_unref(struct udev_enumerate *udev_enumerate) {
   }
 }
 
+#ifdef HAVE_LIBDEVQ
+static char *
+get_devq_event_prop_value(struct devq_event *ev, const char *prop, size_t *len)
+{
+  const char *ev_dump;
+  char *prop_pos;
+  size_t prop_len;
+
+  prop_len = strlen(prop);
+  ev_dump = devq_event_dump(ev);
+  prop_pos = strstr(ev_dump, prop);
+  if (prop_pos == NULL ||
+      (prop_pos != ev_dump + 1 && prop_pos[-1] != ' ') ||
+      prop_pos[prop_len] != '=')
+    return NULL;
+
+  *len = strchrnul(prop_pos + prop_len + 1, ' ') - prop_pos - prop_len - 1;
+  return prop_pos + prop_len + 1;
+}
+
+static int
+devq_event_match_value(struct devq_event *ev, const char *prop, const char *match_value) {
+  const char *value;
+  size_t len;
+
+  value = get_devq_event_prop_value(ev, prop, &len);
+  if (value != NULL &&
+      len == strlen(match_value) &&
+      strncmp(value, match_value, len) == 0)
+    return 1;
+
+  return 0;
+}
+
+static void *
+udev_monitor_thread(void *args) {
+  struct udev_monitor *udev_monitor = args;
+  struct udev_device udev_device;
+  struct devq_event *ev;
+  const char *type, *dev_name;
+  size_t type_len, dev_len;
+  int kq;
+  struct kevent ke;
+
+  kq = devq_event_monitor_get_fd(udev_monitor->evm);
+  if (kq == -1)
+    return NULL;
+
+  while (kevent(kq, NULL, 0, &ke, 1, NULL) > 0) {
+    if (ke.filter == EVFILT_USER || ke.flags & EV_EOF)
+      break;
+    ev = devq_event_monitor_read(udev_monitor->evm);
+    if (ev == NULL)
+      break;
+
+    switch (devq_event_get_type(ev)) {
+    case DEVQ_ATTACHED:
+      break;
+    case DEVQ_DETACHED:
+      break;
+    case DEVQ_NOTICE:
+      if (!devq_event_match_value(ev, "system", "DEVFS"))
+        break;
+      if (!devq_event_match_value(ev, "subsystem", "CDEV"))
+        break;
+      type = get_devq_event_prop_value(ev, "type", &type_len);
+      dev_name = get_devq_event_prop_value(ev, "cdev", &dev_len);
+      if (type == NULL || dev_name == NULL || dev_len > 26)
+        break;
+      if (type_len == 6 && strncmp(type, "CREATE", type_len) == 0)
+        sprintf(udev_device.action, "add");
+      else if (type_len == 7 && strncmp(type, "DESTROY", type_len) == 0)
+        sprintf(udev_device.action, "remove");
+      else
+        break;
+      udev_device.refcount = 1;
+      memcpy(udev_device.syspath, "/dev/", 5);
+      memcpy(udev_device.syspath + 5, dev_name, dev_len);
+      udev_device.syspath[dev_len + 5] = 0;
+      if (strncmp(udev_device.syspath, "/dev/input/event", 16) != 0)
+        break;
+printf("%s %s\n", udev_device.action, udev_device.syspath);
+      write(udev_monitor->fake_fds[1], &udev_device, sizeof(udev_device));
+      break;
+    case DEVQ_UNKNOWN:
+      break;
+    }
+
+    devq_event_free(ev);
+  }
+
+  printf("thr exit\n");
+  return NULL;
+}
+#endif
+
 LIBINPUT_EXPORT
 struct udev_monitor *udev_monitor_new_from_netlink(struct udev *udev,
                                                           const char *name) {
@@ -416,6 +519,19 @@ int udev_monitor_filter_add_match_subsystem_devtype(
 LIBINPUT_EXPORT
 int udev_monitor_enable_receiving(struct udev_monitor *udev_monitor) {
   fprintf(stderr, "stub: udev_monitor_enable_receiving\n");
+#ifdef HAVE_LIBDEVQ
+  struct kevent ev;
+  udev_monitor->evm = devq_event_monitor_init();
+  if (udev_monitor->evm == NULL)
+    return -1;
+  if (pthread_create(&udev_monitor->thread, NULL, udev_monitor_thread,
+      udev_monitor) != 0) {
+    devq_event_monitor_fini(udev_monitor->evm);
+    return -1;
+  }
+  EV_SET(&ev, 1, EVFILT_USER, EV_ADD | EV_ENABLE | EV_CLEAR, 0, 0, 0);
+  kevent(devq_event_monitor_get_fd(udev_monitor->evm), &ev, 1, NULL, 0, NULL);
+#endif
   return 0;
 }
 
@@ -428,14 +544,21 @@ int udev_monitor_get_fd(struct udev_monitor *udev_monitor) {
 LIBINPUT_EXPORT
 struct udev_device *udev_monitor_receive_device(
     struct udev_monitor *udev_monitor) {
-  fprintf(stderr, "stub: udev_monitor_receive_device\n");
+  fprintf(stderr, "udev_monitor_receive_device");
+  struct udev_device *udev_device = calloc(1, sizeof(*udev_device));
+  if (read(udev_monitor->fake_fds[0], udev_device, sizeof(*udev_device)) > 0) {
+    fprintf(stderr, " %s\n", udev_device->syspath);
+    return udev_device;
+  }
+  fprintf(stderr, "\n");
+  free(udev_device);
   return NULL;
 }
 
 LIBINPUT_EXPORT
 const char *udev_device_get_action(struct udev_device *udev_device) {
-  fprintf(stderr, "stub: udev_device_get_action\n");
-  return NULL;
+  fprintf(stderr, "udev_device_get_action return %s\n", udev_device->action);
+  return udev_device->action;
 }
 
 LIBINPUT_EXPORT
@@ -443,6 +566,16 @@ void udev_monitor_unref(struct udev_monitor *udev_monitor) {
   fprintf(stderr, "stub: udev_monitor_unref\n");
   --udev_monitor->refcount;
   if (udev_monitor->refcount == 0) {
+#ifdef HAVE_LIBDEVQ
+    struct kevent ev;
+    int kq = devq_event_monitor_get_fd(udev_monitor->evm);
+    EV_SET(&ev, 1, EVFILT_USER, 0, NOTE_TRIGGER, 0, 0);
+    kevent(kq, &ev, 1, NULL, 0, NULL);
+    pthread_join(udev_monitor->thread, NULL);
+    devq_event_monitor_fini(udev_monitor->evm);
+    close(kq);
+    fprintf(stderr, "stub: udev_monitor_thread_joined\n");
+#endif
     close(udev_monitor->fake_fds[0]);
     close(udev_monitor->fake_fds[1]);
     free(udev_monitor);

@@ -11,8 +11,8 @@ libshared_la_SOURCES = \
 		       shared.h \
 		       ../src/udev-stubs.c
 
-libshared_la_CFLAGS = $(LIBEVDEV_CFLAGS)
-libshared_la_LIBADD = $(LIBEVDEV_LIBS)
+libshared_la_CFLAGS = $(LIBEVDEV_CFLAGS) $(LIBDEVQ_CFLAGS)
+libshared_la_LIBADD = $(LIBEVDEV_LIBS) $(LIBDEVQ_LIBS)
 
 event_debug_SOURCES = event-debug.c
 event_debug_LDADD = ../src/libinput.la libshared.la $(LIBUDEV_LIBS) $(LIBEVDEV_LIBS)

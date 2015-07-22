@@ -1,6 +1,8 @@
 #ifndef UDEV_STUBS_H_
 #define UDEV_STUBS_H_
 
+#include "config.h"
+
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -11,9 +13,15 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#ifdef HAVE_LIBDEVQ
+struct devq_evmon;
+#include <pthread.h>
+#endif
+
 struct udev_device {
   int refcount;
   char syspath[32];
+  char action[8];
 };
 struct udev {
   int refcount;
@@ -24,6 +32,10 @@ struct udev_list_entry {
 };
 struct udev_monitor {
   int refcount;
+#ifdef HAVE_LIBDEVQ
+  pthread_t thread;
+  struct devq_evmon *evm;
+#endif
   int fake_fds[2];
 };
 struct udev_enumerate {
