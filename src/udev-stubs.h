@@ -14,7 +14,6 @@
 struct udev_device {
   int refcount;
   char syspath[32];
-  char const *sysname;
 };
 struct udev {
   int refcount;

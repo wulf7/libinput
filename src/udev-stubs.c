@@ -208,7 +208,6 @@ struct udev_device *udev_device_new_from_syspath(struct udev *udev,
   if (u) {
     u->refcount = 1;
     snprintf(u->syspath, sizeof(u->syspath), "%s", syspath);
-    u->sysname = (char const *)u->syspath + 11;
     return u;
   }
   return NULL;
@@ -222,8 +221,9 @@ const char *udev_device_get_syspath(struct udev_device *udev_device) {
 
 LIBINPUT_EXPORT
 const char *udev_device_get_sysname(struct udev_device *udev_device) {
-  fprintf(stderr, "stub: udev_device_get_sysname\n");
-  return udev_device->sysname;
+  fprintf(stderr, "udev_device_get_sysname return %s\n",
+          udev_device->syspath + 11);
+  return udev_device->syspath + 11;
 }
 
 LIBINPUT_EXPORT
