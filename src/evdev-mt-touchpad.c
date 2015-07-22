@@ -30,10 +30,6 @@
 
 #include "evdev-mt-touchpad.h"
 
-/* Number found by trial-and error, seems to be 1200, divided by the
- * TP_MAGIC_SLOWDOWN in filter.c */
-#define DEFAULT_ACCEL_NUMERATOR 3000.0
-#define DEFAULT_HYSTERESIS_MARGIN_DENOMINATOR 700.0
 #define DEFAULT_TRACKPOINT_ACTIVITY_TIMEOUT 300 /* ms */
 #define DEFAULT_KEYBOARD_ACTIVITY_TIMEOUT_1 200 /* ms */
 #define DEFAULT_KEYBOARD_ACTIVITY_TIMEOUT_2 500 /* ms */
@@ -443,7 +439,7 @@ tp_unpin_finger(struct tp_dispatch *tp, struct tp_touch *t)
 	ydist *= tp->buttons.motion_dist.y_scale_coeff;
 
 	/* 3mm movement -> unpin */
-	if (vector_length(xdist, ydist) >= 3.0) {
+	if (hypot(xdist, ydist) >= 3.0) {
 		t->pinned.is_pinned = false;
 		return;
 	}
@@ -616,7 +612,7 @@ tp_thumb_detect(struct tp_dispatch *tp, struct tp_touch *t)
 		return;
 
 	/* Note: a thumb at the edge of the touchpad won't trigger the
-	 * threshold, the surface areas is usually too small.
+	 * threshold, the surface area is usually too small.
 	 */
 	if (t->pressure < tp->thumb.threshold)
 		return;
@@ -629,7 +625,7 @@ tp_thumb_detect(struct tp_dispatch *tp, struct tp_touch *t)
 	 * - clickfinger must ignore this touch for finger count
 	 * - software buttons are unaffected
 	 * - edge scrolling unaffected
-	 * - gestures: cancel
+	 * - gestures: unaffected
 	 * - tapping: honour thumb on begin, ignore it otherwise for now,
 	 *   this gets a tad complicated otherwise
 	 */
@@ -1464,18 +1460,13 @@ tp_init_palmdetect(struct tp_dispatch *tp,
 
 	/* Wacom doesn't have internal touchpads,
 	 * Apple touchpads are always big enough to warrant palm detection */
-	if (device->model == EVDEV_MODEL_WACOM_TOUCHPAD) {
+	if (device->model == EVDEV_MODEL_WACOM_TOUCHPAD)
 		return 0;
-	} else if (device->model != EVDEV_MODEL_APPLE_TOUCHPAD) {
-		/* We don't know how big the touchpad is */
-		if (device->abs.absinfo_x->resolution == 1)
-			return 0;
 
-		/* Enable palm detection on touchpads >= 70 mm. Anything smaller
-		   probably won't need it, until we find out it does */
-		if (width/device->abs.absinfo_x->resolution < 70)
-			return 0;
-	}
+	/* Enable palm detection on touchpads >= 70 mm. Anything smaller
+	   probably won't need it, until we find out it does */
+	if (width/device->abs.absinfo_x->resolution < 70)
+		return 0;
 
 	/* palm edges are 5% of the width on each side */
 	tp->palm.right_edge = device->abs.absinfo_x->maximum - width * 0.05;
@@ -1545,7 +1536,8 @@ tp_sanity_check(struct tp_dispatch *tp,
 
 error:
 	log_bug_kernel(libinput,
-		       "device %s failed touchpad sanity checks\n");
+		       "device %s failed touchpad sanity checks\n",
+		       device->devname);
 	return -1;
 }
 

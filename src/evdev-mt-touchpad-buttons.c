@@ -50,8 +50,6 @@
  * The state machine only affects the soft button area code.
  */
 
-#define CASE_RETURN_STRING(a) case a: return #a;
-
 static inline const char*
 button_state_to_str(enum button_state state) {
 	switch(state) {
@@ -534,7 +532,7 @@ tp_init_softbuttons(struct tp_dispatch *tp,
 	width = device->abs.dimensions.x;
 	height = device->abs.dimensions.y;
 
-	/* button height: 10mm or 15% orf the touchpad height,
+	/* button height: 10mm or 15% or the touchpad height,
 	   whichever is smaller */
 	if ((height * 0.15)/yres > 10) {
 		tp->buttons.bottom_area.top_edge =
@@ -975,7 +973,6 @@ tp_post_clickpadbutton_buttons(struct tp_dispatch *tp, uint64_t time)
 
 	current = tp->buttons.state;
 	old = tp->buttons.old_state;
-	button = 0;
 	is_top = 0;
 
 	if (!tp->buttons.click_pending && current == old)
