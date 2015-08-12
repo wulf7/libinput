@@ -3,6 +3,7 @@
 
 #include "config.h"
 
+#include <sys/queue.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
@@ -28,7 +29,7 @@ struct udev {
 };
 struct udev_list_entry {
   char path[32];
-  struct udev_list_entry *next;
+  STAILQ_ENTRY(udev_list_entry) next;
 };
 struct udev_monitor {
   int refcount;
@@ -38,13 +39,16 @@ struct udev_monitor {
 #endif
   int fake_fds[2];
 };
+STAILQ_HEAD(udev_list_head, udev_list_entry);
 struct udev_enumerate {
   int refcount;
-  struct udev_list_entry *dev_list;
+  struct udev_list_head dev_list;
 };
 
 #define udev_list_entry_foreach(list_entry, first_entry)                      \
-  for (list_entry = first_entry; list_entry; list_entry = list_entry->next)
+  for(list_entry = first_entry;                                               \
+      list_entry != NULL;                                                     \
+      list_entry = udev_list_entry_get_next(list_entry))
 
 char const *udev_device_get_devnode(struct udev_device *udev_device);
 char const *udev_device_get_property_value(struct udev_device *dummy __unused, char const *property);
@@ -71,13 +75,10 @@ int udev_enumerate_add_match_subsystem(
 int udev_enumerate_scan_devices(struct udev_enumerate *udev_enumerate);
 struct udev_list_entry *udev_enumerate_get_list_entry(
     struct udev_enumerate *udev_enumerate);
-
-#define udev_list_entry_foreach(list_entry, first_entry)                      \
-  for (list_entry = first_entry; list_entry; list_entry = list_entry->next)
-
+struct udev_list_entry *udev_list_entry_get_next(
+    struct udev_list_entry *list_entry);
 const char *udev_list_entry_get_name(
     struct udev_list_entry *list_entry);
-void free_dev_list(struct udev_list_entry **list);
 void udev_enumerate_unref(struct udev_enumerate *udev_enumerate);
 struct udev_monitor *udev_monitor_new_from_netlink(struct udev *udev,
                                                           const char *name);

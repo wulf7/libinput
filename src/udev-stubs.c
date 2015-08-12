@@ -296,6 +296,7 @@ LIBINPUT_EXPORT
 struct udev_enumerate *udev_enumerate_new(struct udev *udev) {
   fprintf(stderr, "udev_enumerate_new\n");
   struct udev_enumerate *u = calloc(1, sizeof(struct udev_enumerate));
+  STAILQ_INIT(&u->dev_list);
   if (u) {
     u->refcount = 1;
     return u;
@@ -318,16 +319,16 @@ static struct udev_list_entry *create_list_entry(char const *path) {
   return le;
 }
 
-LIBINPUT_EXPORT
-void free_dev_list(struct udev_list_entry **list) {
-  if (!*list)
-    return;
+static void free_dev_list(struct udev_list_head *head) {
+  struct udev_list_entry *le1, *le2;
 
-  if ((*list)->next)
-    free_dev_list(&(*list)->next);
-
-  free(*list);
-  *list = NULL;
+  le1 = STAILQ_FIRST(head);
+  while (le1 != NULL) {
+    le2 = STAILQ_NEXT(le1, next);
+    free(le1);
+    le1 = le2;
+  }
+  STAILQ_INIT(head);
 }
 
 LIBINPUT_EXPORT
@@ -357,12 +358,7 @@ int udev_enumerate_scan_devices(struct udev_enumerate *udev_enumerate) {
       return -1;
     }
 
-    struct udev_list_entry **list_end = &udev_enumerate->dev_list;
-    while (*list_end) {
-      list_end = &((*list_end)->next);
-    }
-
-    *list_end = le;
+    STAILQ_INSERT_TAIL(&udev_enumerate->dev_list, le, next);
   }
 
   closedir(dir);
@@ -372,7 +368,13 @@ int udev_enumerate_scan_devices(struct udev_enumerate *udev_enumerate) {
 LIBINPUT_EXPORT
 struct udev_list_entry *udev_enumerate_get_list_entry(
     struct udev_enumerate *udev_enumerate) {
-  return udev_enumerate->dev_list;
+  return STAILQ_FIRST(&udev_enumerate->dev_list);
+}
+
+LIBINPUT_EXPORT
+struct udev_list_entry *udev_list_entry_get_next(
+    struct udev_list_entry *list_entry) {
+  return STAILQ_NEXT(list_entry, next);
 }
 
 LIBINPUT_EXPORT
