@@ -37,6 +37,8 @@
 
 #define VENDOR_ID_APPLE 0x5ac
 #define VENDOR_ID_WACOM 0x56a
+#define VENDOR_ID_SYNAPTICS_SERIAL 0x002
+#define PRODUCT_ID_SYNAPTICS_SERIAL 0x007
 
 /* The HW DPI rate we normalize to before calculating pointer acceleration */
 #define DEFAULT_MOUSE_DPI 1000
@@ -300,5 +302,35 @@ int parse_mouse_dpi_property(const char *prop);
 int parse_mouse_wheel_click_angle_property(const char *prop);
 double parse_trackpoint_accel_property(const char *prop);
 bool parse_dimension_property(const char *prop, size_t *width, size_t *height);
+
+static inline uint64_t
+us(uint64_t us)
+{
+	return us;
+}
+
+static inline uint64_t
+ns2us(uint64_t ns)
+{
+	return us(ns / 1000);
+}
+
+static inline uint64_t
+ms2us(uint64_t ms)
+{
+	return us(ms * 1000);
+}
+
+static inline uint64_t
+s2us(uint64_t s)
+{
+	return ms2us(s * 1000);
+}
+
+static inline uint32_t
+us2ms(uint64_t us)
+{
+	return (uint32_t)(us / 1000);
+}
 
 #endif /* LIBINPUT_UTIL_H */

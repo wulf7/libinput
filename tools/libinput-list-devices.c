@@ -176,6 +176,18 @@ click_defaults(struct libinput_device *device)
 	return str;
 }
 
+static const char *
+dwt_default(struct libinput_device *device)
+{
+	if (!libinput_device_config_dwt_is_available(device))
+		return "n/a";
+
+	if (libinput_device_config_dwt_get_default_enabled(device))
+		return "enabled";
+	else
+		return "disabled";
+}
+
 static void
 print_device_notify(struct libinput_event *ev)
 {
@@ -238,6 +250,8 @@ print_device_notify(struct libinput_event *ev)
 	str = click_defaults(dev);
 	printf("Click methods:    %s\n", str);
 	free(str);
+
+	printf("Disable-w-typing: %s\n", dwt_default(dev));
 
 	printf("\n");
 }

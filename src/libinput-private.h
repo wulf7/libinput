@@ -201,6 +201,17 @@ struct libinput_device_config_middle_emulation {
 			 struct libinput_device *device);
 };
 
+struct libinput_device_config_dwt {
+	int (*is_available)(struct libinput_device *device);
+	enum libinput_config_status (*set_enabled)(
+			 struct libinput_device *device,
+			 enum libinput_config_dwt_state enable);
+	enum libinput_config_dwt_state (*get_enabled)(
+			 struct libinput_device *device);
+	enum libinput_config_dwt_state (*get_default_enabled)(
+			 struct libinput_device *device);
+};
+
 struct libinput_device_config {
 	struct libinput_device_config_tap *tap;
 	struct libinput_device_config_calibration *calibration;
@@ -211,6 +222,7 @@ struct libinput_device_config {
 	struct libinput_device_config_scroll_method *scroll_method;
 	struct libinput_device_config_click_method *click_method;
 	struct libinput_device_config_middle_emulation *middle_emulation;
+	struct libinput_device_config_dwt *dwt;
 };
 
 struct libinput_device_group {
@@ -284,6 +296,9 @@ open_restricted(struct libinput *libinput,
 
 void
 close_restricted(struct libinput *libinput, int fd);
+
+bool
+ignore_litest_test_suite_device(struct udev_device *device);
 
 void
 libinput_seat_init(struct libinput_seat *seat,
@@ -415,7 +430,7 @@ libinput_now(struct libinput *libinput)
 		return 0;
 	}
 
-	return ts.tv_sec * 1000ULL + ts.tv_nsec / 1000000;
+	return s2us(ts.tv_sec) + ns2us(ts.tv_nsec);
 }
 
 static inline struct device_float_coords

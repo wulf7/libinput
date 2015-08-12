@@ -45,8 +45,9 @@ liblitest_la_SOURCES = \
 	litest.c
 liblitest_la_LIBADD = $(top_builddir)/src/libinput-util.la
 liblitest_la_CFLAGS = $(AM_CFLAGS) \
-	      -DLIBINPUT_UDEV_RULES_FILE="\"$(abs_top_builddir)/udev/90-libinput-model-quirks-litest.rules\"" \
-	      -DLIBINPUT_UDEV_HWDB_FILE="\"$(abs_top_srcdir)/udev/90-libinput-model-quirks.hwdb\""
+	      -DLIBINPUT_MODEL_QUIRKS_UDEV_RULES_FILE="\"$(abs_top_builddir)/udev/90-libinput-model-quirks-litest.rules\"" \
+	      -DLIBINPUT_MODEL_QUIRKS_UDEV_HWDB_FILE="\"$(abs_top_srcdir)/udev/90-libinput-model-quirks.hwdb\"" \
+	      -DLIBINPUT_TEST_DEVICE_RULES_FILE="\"$(abs_top_srcdir)/udev/80-libinput-test-device.rules\""
 if HAVE_LIBUNWIND
 liblitest_la_LIBADD += $(LIBUNWIND_LIBS) -ldl
 liblitest_la_CFLAGS += $(LIBUNWIND_CFLAGS)
@@ -55,6 +56,7 @@ endif
 run_tests = \
 	test-touchpad \
 	test-touchpad-tap \
+	test-touchpad-buttons \
 	test-device \
 	test-gestures \
 	test-pointer \
@@ -106,6 +108,10 @@ test_touchpad_LDFLAGS = -no-install
 test_touchpad_tap_SOURCES = touchpad-tap.c
 test_touchpad_tap_LDADD = $(TEST_LIBS)
 test_touchpad_tap_LDFLAGS = -no-install
+
+test_touchpad_buttons_SOURCES = touchpad-buttons.c
+test_touchpad_buttons_LDADD = $(TEST_LIBS)
+test_touchpad_buttons_LDFLAGS = -no-install
 
 test_trackpoint_SOURCES = trackpoint.c
 test_trackpoint_LDADD = $(TEST_LIBS)

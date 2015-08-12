@@ -35,8 +35,8 @@
 
 #include "evdev-mt-touchpad.h"
 
-#define DEFAULT_TAP_TIMEOUT_PERIOD 180
-#define DEFAULT_DRAG_TIMEOUT_PERIOD 300
+#define DEFAULT_TAP_TIMEOUT_PERIOD ms2us(180)
+#define DEFAULT_DRAG_TIMEOUT_PERIOD ms2us(300)
 #define DEFAULT_TAP_MOVE_THRESHOLD TP_MM_TO_DPI_NORMALIZED(3)
 
 enum tap_event {
@@ -730,7 +730,7 @@ tp_tap_handle_state(struct tp_dispatch *tp, uint64_t time)
 			/* The simple version: if a touch is a thumb on
 			 * begin we ignore it. All other thumb touches
 			 * follow the normal tap state for now */
-			if (t->is_thumb) {
+			if (t->thumb.state == THUMB_STATE_YES) {
 				t->tap.is_thumb = true;
 				continue;
 			}
@@ -762,7 +762,7 @@ tp_tap_handle_state(struct tp_dispatch *tp, uint64_t time)
 
 			tp_tap_handle_event(tp, t, TAP_EVENT_MOTION, time);
 		} else if (tp->tap.state != TAP_STATE_IDLE &&
-			   t->is_thumb &&
+			   t->thumb.state == THUMB_STATE_YES &&
 			   !t->tap.is_thumb) {
 			tp_tap_handle_event(tp, t, TAP_EVENT_THUMB, time);
 		}

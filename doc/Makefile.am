@@ -18,12 +18,14 @@ header_files = \
 	$(srcdir)/normalization-of-relative-motion.dox \
 	$(srcdir)/palm-detection.dox \
 	$(srcdir)/page-hierarchy.dox \
+	$(srcdir)/reporting-bugs.dox \
 	$(srcdir)/scrolling.dox \
 	$(srcdir)/seats.dox \
 	$(srcdir)/t440-support.dox \
 	$(srcdir)/tapping.dox \
 	$(srcdir)/test-suite.dox \
-	$(srcdir)/tools.dox
+	$(srcdir)/tools.dox \
+	$(srcdir)/touchpads.dox
 
 diagram_files = \
 	$(srcdir)/dot/seats-sketch.gv \
@@ -39,6 +41,7 @@ diagram_files = \
 	$(srcdir)/svg/pinch-gestures.svg \
 	$(srcdir)/svg/swipe-gestures.svg \
 	$(srcdir)/svg/tap-n-drag.svg \
+	$(srcdir)/svg/thumb-detection.svg \
 	$(srcdir)/svg/top-software-buttons.svg \
 	$(srcdir)/svg/touchscreen-gestures.svg \
 	$(srcdir)/svg/twofinger-scrolling.svg

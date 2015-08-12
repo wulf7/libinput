@@ -316,7 +316,7 @@ udev_device_from_devnode(struct libinput *libinput,
 		dev = udev_device_new_from_devnum(udev, 'c', st.st_rdev);
 
 		count++;
-		if (count > 50) {
+		if (count > 200) {
 			log_bug_libinput(libinput,
 					"udev device never initialized (%s)\n",
 					devnode);
@@ -344,6 +344,11 @@ libinput_path_add_device(struct libinput *libinput,
 	udev_device = udev_device_from_devnode(libinput, udev, path);
 	if (!udev_device) {
 		log_bug_client(libinput, "Invalid path %s\n", path);
+		return NULL;
+	}
+
+	if (ignore_litest_test_suite_device(udev_device)) {
+		udev_device_unref(udev_device);
 		return NULL;
 	}
 

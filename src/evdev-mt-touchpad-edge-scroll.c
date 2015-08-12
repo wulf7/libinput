@@ -97,7 +97,7 @@ static inline void
 tp_edge_scroll_set_timer(struct tp_dispatch *tp,
 			 struct tp_touch *t)
 {
-	const int DEFAULT_SCROLL_LOCK_TIMEOUT = 300; /* ms */
+	const int DEFAULT_SCROLL_LOCK_TIMEOUT = ms2us(300);
 	/* if we use software buttons, we disable timeout-based
 	 * edge scrolling. A finger resting on the button areas is
 	 * likely there to trigger a button event.
@@ -289,30 +289,11 @@ int
 tp_edge_scroll_init(struct tp_dispatch *tp, struct evdev_device *device)
 {
 	struct tp_touch *t;
-	int width, height;
 	int edge_width, edge_height;
 
-	width = device->abs.dimensions.x;
-	height = device->abs.dimensions.y;
-
-	switch (tp->model) {
-	case MODEL_ALPS:
-		edge_width = width * .15;
-		edge_height = height * .15;
-		break;
-	case MODEL_APPLETOUCH: /* unibody are all clickpads, so N/A */
-		edge_width = width * .085;
-		edge_height = height * .085;
-		break;
-	default:
-		/* For elantech and synaptics, note for lenovo #40 series,
-		 * e.g. the T440s min/max are the absolute edges, not the
-		 * recommended ones as usual with synaptics.
-		 */
-		edge_width = width * .04;
-		edge_height = height * .054;
-		break;
-	}
+	/* 7mm edge size */
+	edge_width = device->abs.absinfo_x->resolution * 7;
+	edge_height = device->abs.absinfo_y->resolution * 7;
 
 	tp->scroll.right_edge = device->abs.absinfo_x->maximum - edge_width;
 	tp->scroll.bottom_edge = device->abs.absinfo_y->maximum - edge_height;
@@ -365,7 +346,7 @@ tp_edge_scroll_handle_state(struct tp_dispatch *tp, uint64_t time)
 int
 tp_edge_scroll_post_events(struct tp_dispatch *tp, uint64_t time)
 {
-	struct libinput_device *device = &tp->device->base;
+	struct evdev_device *device = tp->device;
 	struct tp_touch *t;
 	enum libinput_pointer_axis axis;
 	double *delta;
@@ -383,11 +364,16 @@ tp_edge_scroll_post_events(struct tp_dispatch *tp, uint64_t time)
 		if (t->palm.state != PALM_NONE)
 			continue;
 
+		/* only scroll with the finger in the previous edge */
+		if (t->scroll.edge &&
+		    (tp_touch_get_edge(tp, t) & t->scroll.edge) == 0)
+			continue;
+
 		switch (t->scroll.edge) {
 			case EDGE_NONE:
 				if (t->scroll.direction != -1) {
 					/* Send stop scroll event */
-					pointer_notify_axis(device, time,
+					evdev_notify_axis(device, time,
 						AS_MASK(t->scroll.direction),
 						LIBINPUT_POINTER_AXIS_SOURCE_FINGER,
 						&zero,
@@ -413,7 +399,7 @@ tp_edge_scroll_post_events(struct tp_dispatch *tp, uint64_t time)
 		switch (t->scroll.edge_state) {
 		case EDGE_SCROLL_TOUCH_STATE_NONE:
 		case EDGE_SCROLL_TOUCH_STATE_AREA:
-			log_bug_libinput(device->seat->libinput,
+			log_bug_libinput(tp_libinput_context(tp),
 					 "unexpected scroll state %d\n",
 					 t->scroll.edge_state);
 			break;
@@ -434,11 +420,11 @@ tp_edge_scroll_post_events(struct tp_dispatch *tp, uint64_t time)
 		if (*delta == 0.0)
 			continue;
 
-		pointer_notify_axis(device, time,
-				    AS_MASK(axis),
-				    LIBINPUT_POINTER_AXIS_SOURCE_FINGER,
-				    &normalized,
-				    &zero_discrete);
+		evdev_notify_axis(device, time,
+				  AS_MASK(axis),
+				  LIBINPUT_POINTER_AXIS_SOURCE_FINGER,
+				  &normalized,
+				  &zero_discrete);
 		t->scroll.direction = axis;
 
 		tp_edge_scroll_handle_event(tp, t, SCROLL_EVENT_POSTED);
@@ -450,14 +436,14 @@ tp_edge_scroll_post_events(struct tp_dispatch *tp, uint64_t time)
 void
 tp_edge_scroll_stop_events(struct tp_dispatch *tp, uint64_t time)
 {
-	struct libinput_device *device = &tp->device->base;
+	struct evdev_device *device = tp->device;
 	struct tp_touch *t;
 	const struct normalized_coords zero = { 0.0, 0.0 };
 	const struct discrete_coords zero_discrete = { 0.0, 0.0 };
 
 	tp_for_each_touch(tp, t) {
 		if (t->scroll.direction != -1) {
-			pointer_notify_axis(device, time,
+			evdev_notify_axis(device, time,
 					    AS_MASK(t->scroll.direction),
 					    LIBINPUT_POINTER_AXIS_SOURCE_FINGER,
 					    &zero,

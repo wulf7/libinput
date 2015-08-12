@@ -53,8 +53,12 @@
 #define UDEV_RULES_D "/run/udev/rules.d"
 #define UDEV_RULE_PREFIX "99-litest-"
 #define UDEV_HWDB_D "/etc/udev/hwdb.d"
-#define UDEV_COMMON_RULE_FILE UDEV_RULES_D "/91-litest-model-quirks-REMOVEME.rules"
-#define UDEV_COMMON_HWDB_FILE UDEV_HWDB_D "/91-litest-model-quirks-REMOVEME.hwdb"
+#define UDEV_MODEL_QUIRKS_RULE_FILE UDEV_RULES_D \
+	"/91-litest-model-quirks-REMOVEME.rules"
+#define UDEV_MODEL_QUIRKS_HWDB_FILE UDEV_HWDB_D \
+	"/91-litest-model-quirks-REMOVEME.hwdb"
+#define UDEV_TEST_DEVICE_RULE_FILE UDEV_RULES_D \
+	"/91-litest-test-device-REMOVEME.rules"
 
 static int in_debugger = -1;
 static int verbose = 0;
@@ -63,6 +67,7 @@ const char *filter_device = NULL;
 const char *filter_group = NULL;
 
 static inline void litest_remove_model_quirks(void);
+static void litest_init_udev_rules(void);
 
 /* defined for the litest selftest */
 #ifndef LITEST_DISABLE_BACKTRACE_LOGGING
@@ -442,7 +447,7 @@ litest_drop_udev_rules(void)
 		    &entries,
 		    litest_udev_rule_filter,
 		    alphasort);
-	if (n < 0)
+	if (n <= 0)
 		return;
 
 	while (n--) {
@@ -462,7 +467,6 @@ litest_drop_udev_rules(void)
 	}
 	free(entries);
 
-	litest_remove_model_quirks();
 	litest_reload_udev_rules();
 }
 
@@ -773,6 +777,10 @@ litest_log_handler(struct libinput *libinput,
 
 	fprintf(stderr, "litest %s: ", priority);
 	vfprintf(stderr, format, args);
+
+	if (strstr(format, "client bug: ") ||
+	    strstr(format, "libinput bug: "))
+		litest_abort_msg("libinput bug triggered, aborting.\n");
 }
 
 static int
@@ -822,6 +830,8 @@ litest_run(int argc, char **argv)
 	if (getenv("LITEST_VERBOSE"))
 		verbose = 1;
 
+	litest_init_udev_rules();
+
 	srunner_run_all(sr, CK_ENV);
 	failed = srunner_ntests_failed(sr);
 	srunner_free(sr);
@@ -839,6 +849,9 @@ litest_run(int argc, char **argv)
 		free(s->name);
 		free(s);
 	}
+
+	litest_remove_model_quirks();
+	litest_reload_udev_rules();
 
 	return failed;
 }
@@ -942,27 +955,29 @@ litest_install_model_quirks(void)
 			 "# running, remove this file and update your hwdb: \n"
 			 "#       sudo udevadm hwdb --update\n"
 			 "#################################################################\n\n";
-	litest_copy_file(UDEV_COMMON_RULE_FILE,
-			 LIBINPUT_UDEV_RULES_FILE,
+	litest_copy_file(UDEV_MODEL_QUIRKS_RULE_FILE,
+			 LIBINPUT_MODEL_QUIRKS_UDEV_RULES_FILE,
 			 warning);
-	litest_copy_file(UDEV_COMMON_HWDB_FILE,
-			 LIBINPUT_UDEV_HWDB_FILE,
+	litest_copy_file(UDEV_MODEL_QUIRKS_HWDB_FILE,
+			 LIBINPUT_MODEL_QUIRKS_UDEV_HWDB_FILE,
+			 warning);
+	litest_copy_file(UDEV_TEST_DEVICE_RULE_FILE,
+			 LIBINPUT_TEST_DEVICE_RULES_FILE,
 			 warning);
 }
 
 static inline void
 litest_remove_model_quirks(void)
 {
-	unlink(UDEV_COMMON_RULE_FILE);
-	unlink(UDEV_COMMON_HWDB_FILE);
+	unlink(UDEV_MODEL_QUIRKS_RULE_FILE);
+	unlink(UDEV_MODEL_QUIRKS_HWDB_FILE);
+	unlink(UDEV_TEST_DEVICE_RULE_FILE);
 }
 
-static char *
-litest_init_udev_rules(struct litest_test_device *dev)
+static void
+litest_init_udev_rules(void)
 {
 	int rc;
-	FILE *f;
-	char *path = NULL;
 
 	rc = mkdir(UDEV_RULES_D, 0755);
 	if (rc == -1 && errno != EEXIST)
@@ -975,10 +990,18 @@ litest_init_udev_rules(struct litest_test_device *dev)
 			     strerror(errno));
 
 	litest_install_model_quirks();
+	litest_reload_udev_rules();
+}
 
-	/* device-specific udev rules */
+static char *
+litest_init_device_udev_rules(struct litest_test_device *dev)
+{
+	int rc;
+	FILE *f;
+	char *path = NULL;
+
 	if (!dev->udev_rule)
-		goto out;
+		return NULL;
 
 	rc = xasprintf(&path,
 		      "%s/%s%s.rules",
@@ -995,7 +1018,6 @@ litest_init_udev_rules(struct litest_test_device *dev)
 	litest_assert_int_ge(fputs(dev->udev_rule, f), 0);
 	fclose(f);
 
-out:
 	litest_reload_udev_rules();
 
 	return path;
@@ -1029,18 +1051,17 @@ litest_create(enum litest_device_type which,
 	d = zalloc(sizeof(*d));
 	litest_assert(d != NULL);
 
-	udev_file = litest_init_udev_rules(*dev);
-
+	udev_file = litest_init_device_udev_rules(*dev);
 	/* device has custom create method */
 	if ((*dev)->create) {
 		(*dev)->create(d);
 		if (abs_override || events_override) {
-			litest_remove_model_quirks();
 			if (udev_file)
 				unlink(udev_file);
 			litest_abort_msg("Custom create cannot be overridden");
 		}
 
+		d->udev_rule_file = udev_file;
 		return d;
 	}
 
@@ -1186,10 +1207,10 @@ litest_delete_device(struct litest_device *d)
 		return;
 
 	if (d->udev_rule_file) {
-		litest_remove_model_quirks();
 		unlink(d->udev_rule_file);
 		free(d->udev_rule_file);
 		d->udev_rule_file = NULL;
+		litest_reload_udev_rules();
 	}
 
 	libinput_device_unref(d->libinput_device);
@@ -1222,6 +1243,9 @@ axis_replacement_value(struct axis_replacement *axes,
 		       int32_t *value)
 {
 	struct axis_replacement *axis = axes;
+
+	if (!axes)
+		return false;
 
 	while (axis->evcode != -1) {
 		if (axis->evcode == evcode) {
@@ -1267,9 +1291,6 @@ litest_auto_assign_value(struct litest_device *d,
 		break;
 	default:
 		value = -1;
-		if (!axes)
-			break;
-
 		if (!axis_replacement_value(axes, ev->code, &value) &&
 		    d->interface->get_axis_default)
 			d->interface->get_axis_default(d, ev->code, &value);
@@ -1813,12 +1834,17 @@ litest_print_event(struct libinput_event *event)
 		break;
 	case LIBINPUT_EVENT_POINTER_AXIS:
 		p = libinput_event_get_pointer_event(event);
-		fprintf(stderr,
-			"vert %.f horiz %.2f",
-			libinput_event_pointer_get_axis_value(p,
-				LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL),
-			libinput_event_pointer_get_axis_value(p,
-				LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL));
+		x = 0.0;
+		y = 0.0;
+		if (libinput_event_pointer_has_axis(p,
+				LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL))
+			y = libinput_event_pointer_get_axis_value(p,
+				LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL);
+		if (libinput_event_pointer_has_axis(p,
+				LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL))
+			x = libinput_event_pointer_get_axis_value(p,
+				LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL);
+		fprintf(stderr, "vert %.f horiz %.2f", y, x);
 		break;
 	default:
 		break;
@@ -2214,9 +2240,9 @@ litest_assert_scroll(struct libinput *li,
 			}
 		} else {
 			/* Last scroll event, must be 0 */
-			litest_assert_int_eq(
+			ck_assert_double_eq(
 				libinput_event_pointer_get_axis_value(ptrev, axis),
-				0);
+				0.0);
 		}
 		libinput_event_destroy(event);
 		event = next_event;
@@ -2540,6 +2566,7 @@ main(int argc, char **argv)
 	list_init(&all_tests);
 
 	setenv("CK_DEFAULT_TIMEOUT", "10", 0);
+	setenv("LIBINPUT_RUNNING_TEST_SUITE", "1", 1);
 
 	mode = litest_parse_argv(argc, argv);
 	if (mode == LITEST_MODE_ERROR)
