@@ -296,6 +296,7 @@ LIBINPUT_EXPORT
 struct udev_enumerate *udev_enumerate_new(struct udev *udev) {
   fprintf(stderr, "udev_enumerate_new\n");
   struct udev_enumerate *u = calloc(1, sizeof(struct udev_enumerate));
+  STAILQ_INIT(&u->filters);
   STAILQ_INIT(&u->dev_list);
   if (u) {
     u->refcount = 1;
@@ -308,6 +309,14 @@ LIBINPUT_EXPORT
 int udev_enumerate_add_match_subsystem(
     struct udev_enumerate *udev_enumerate, const char *subsystem) {
   fprintf(stderr, "stub: udev_enumerate_add_match_subsystem\n");
+  struct udev_filter_entry *fe = calloc(1, sizeof(struct udev_filter_entry));
+  if (fe == NULL)
+    return -1;
+
+  fe->type = UDEV_FILTER_TYPE_SUBSYSTEM;
+  fe->neg = 0;
+  snprintf(fe->expr, sizeof(fe->expr), "%s", subsystem);
+  STAILQ_INSERT_TAIL(&udev_enumerate->filters, fe, next);
   return 0;
 }
 
@@ -317,6 +326,18 @@ static struct udev_list_entry *create_list_entry(char const *path) {
     return NULL;
   snprintf(le->path, sizeof(le->path), "%s", path);
   return le;
+}
+
+static void free_filters(struct udev_filter_head *head) {
+  struct udev_filter_entry *fe1, *fe2;
+
+  fe1 = STAILQ_FIRST(head);
+  while (fe1 != NULL) {
+    fe2 = STAILQ_NEXT(fe1, next);
+    free(fe1);
+    fe1 = fe2;
+  }
+  STAILQ_INIT(head);
 }
 
 static void free_dev_list(struct udev_list_head *head) {
@@ -331,9 +352,7 @@ static void free_dev_list(struct udev_list_head *head) {
   STAILQ_INIT(head);
 }
 
-LIBINPUT_EXPORT
-int udev_enumerate_scan_devices(struct udev_enumerate *udev_enumerate) {
-  fprintf(stderr, "udev_enumerate_scan_devices\n");
+static int enumerate_input_devices(struct udev_list_head *lh) {
 
   DIR *dir;
   struct dirent *ent;
@@ -353,16 +372,40 @@ int udev_enumerate_scan_devices(struct udev_enumerate *udev_enumerate) {
 
     struct udev_list_entry *le = create_list_entry(path);
     if (!le) {
-      free_dev_list(&udev_enumerate->dev_list);
+      free_dev_list(lh);
       closedir(dir);
       return -1;
     }
 
-    STAILQ_INSERT_TAIL(&udev_enumerate->dev_list, le, next);
+    STAILQ_INSERT_TAIL(lh, le, next);
   }
 
   closedir(dir);
   return 0;
+}
+
+LIBINPUT_EXPORT
+int udev_enumerate_scan_devices(struct udev_enumerate *udev_enumerate) {
+  struct udev_filter_entry *fe;
+  struct udev_list_head lh = STAILQ_HEAD_INITIALIZER(lh);
+
+  fprintf(stderr, "udev_enumerate_scan_devices\n");
+
+  free_dev_list(&udev_enumerate->dev_list);
+  STAILQ_FOREACH(fe, &udev_enumerate->filters, next) {
+    if (fe->type == UDEV_FILTER_TYPE_SUBSYSTEM &&
+        fe->neg == 0 &&
+        strcmp(fe->expr, "input") == 0) {
+      if (enumerate_input_devices(&lh) != 0)
+        goto error;
+      STAILQ_CONCAT(&udev_enumerate->dev_list, &lh);
+    }
+  }
+  return 0;
+
+error:
+  free_dev_list(&udev_enumerate->dev_list);
+  return -1;
 }
 
 LIBINPUT_EXPORT
@@ -389,6 +432,7 @@ void udev_enumerate_unref(struct udev_enumerate *udev_enumerate) {
   fprintf(stderr, "udev_enumerate_unref\n");
   --udev_enumerate->refcount;
   if (udev_enumerate->refcount == 0) {
+    free_filters(&udev_enumerate->filters);
     free_dev_list(&udev_enumerate->dev_list);
     free(udev_enumerate);
   }

@@ -31,6 +31,18 @@ struct udev_list_entry {
   char path[32];
   STAILQ_ENTRY(udev_list_entry) next;
 };
+
+enum {
+  UDEV_FILTER_TYPE_SUBSYSTEM,
+};
+struct udev_filter_entry {
+  int type;
+  int neg;
+  char expr[32];
+  STAILQ_ENTRY(udev_filter_entry) next;
+};
+STAILQ_HEAD(udev_filter_head, udev_filter_entry);
+
 struct udev_monitor {
   int refcount;
 #ifdef HAVE_LIBDEVQ
@@ -39,9 +51,11 @@ struct udev_monitor {
 #endif
   int fake_fds[2];
 };
+
 STAILQ_HEAD(udev_list_head, udev_list_entry);
 struct udev_enumerate {
   int refcount;
+  struct udev_filter_head filters;
   struct udev_list_head dev_list;
 };
 
