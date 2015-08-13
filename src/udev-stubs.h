@@ -1,64 +1,13 @@
 #ifndef UDEV_STUBS_H_
 #define UDEV_STUBS_H_
 
-#include "config.h"
-
-#include <sys/queue.h>
-#include <sys/stat.h>
 #include <sys/types.h>
 
-#include <stdarg.h>
-#include <stdio.h>
-#include <stdlib.h>
-
-#include <fcntl.h>
-#include <unistd.h>
-
-#ifdef HAVE_LIBDEVQ
-struct devq_evmon;
-#include <pthread.h>
-#endif
-
-struct udev_device {
-  int refcount;
-  char syspath[32];
-  char action[8];
-};
-struct udev {
-  int refcount;
-};
-struct udev_list_entry {
-  char path[32];
-  STAILQ_ENTRY(udev_list_entry) next;
-};
-
-enum {
-  UDEV_FILTER_TYPE_SUBSYSTEM,
-};
-struct udev_filter_entry {
-  int type;
-  int neg;
-  char expr[32];
-  STAILQ_ENTRY(udev_filter_entry) next;
-};
-STAILQ_HEAD(udev_filter_head, udev_filter_entry);
-
-struct udev_monitor {
-  int refcount;
-#ifdef HAVE_LIBDEVQ
-  pthread_t thread;
-  struct devq_evmon *evm;
-#endif
-  int fake_fds[2];
-  struct udev_filter_head filters;
-};
-
-STAILQ_HEAD(udev_list_head, udev_list_entry);
-struct udev_enumerate {
-  int refcount;
-  struct udev_filter_head filters;
-  struct udev_list_head dev_list;
-};
+struct udev_device;
+struct udev;
+struct udev_list_entry;
+struct udev_monitor;
+struct udev_enumerate;
 
 #define udev_list_entry_foreach(list_entry, first_entry)                      \
   for(list_entry = first_entry;                                               \

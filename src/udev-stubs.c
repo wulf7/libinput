@@ -1,15 +1,24 @@
 #include "config.h"
 #include "udev-stubs.h"
 
+#include <sys/types.h>
+#include <sys/queue.h>
+#include <sys/stat.h>
+
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <stdarg.h>
 #include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
 #include <libevdev/libevdev.h>
 
 #ifdef HAVE_LIBPROCSTAT_H
 #include <sys/sysctl.h>
 #include <sys/param.h>
-#include <sys/queue.h>
 #include <sys/socket.h>
 #include <kvm.h>
 #include <libprocstat.h>
@@ -17,11 +26,55 @@
 
 #ifdef HAVE_LIBDEVQ
 #include <libdevq.h>
-#include <sys/types.h>
+#include <pthread.h>
 #include <sys/event.h>
 #endif
 
 #include "libinput-util.h"
+
+struct udev_device {
+  int refcount;
+  char syspath[32];
+  char action[8];
+};
+
+struct udev {
+  int refcount;
+};
+
+struct udev_list_entry {
+  char path[32];
+  STAILQ_ENTRY(udev_list_entry) next;
+};
+
+enum {
+  UDEV_FILTER_TYPE_SUBSYSTEM,
+};
+
+struct udev_filter_entry {
+  int type;
+  int neg;
+  char expr[32];
+  STAILQ_ENTRY(udev_filter_entry) next;
+};
+STAILQ_HEAD(udev_filter_head, udev_filter_entry);
+
+struct udev_monitor {
+  int refcount;
+#ifdef HAVE_LIBDEVQ
+  pthread_t thread;
+  struct devq_evmon *evm;
+#endif
+  int fake_fds[2];
+  struct udev_filter_head filters;
+};
+
+STAILQ_HEAD(udev_list_head, udev_list_entry);
+struct udev_enumerate {
+  int refcount;
+  struct udev_filter_head filters;
+  struct udev_list_head dev_list;
+};
 
 
 LIBINPUT_EXPORT
