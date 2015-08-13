@@ -472,12 +472,24 @@ devq_event_match_value(struct devq_event *ev, const char *prop, const char *matc
   return 0;
 }
 
+static int
+udev_monitor_send_device(struct udev_monitor *udev_monitor,
+                         const char *syspath, const char *action) {
+  struct udev_device udev_device;
+
+  udev_device.refcount = 1;
+  snprintf(udev_device.action, sizeof(udev_device.action), "%s", action);
+  snprintf(udev_device.syspath, sizeof(udev_device.syspath), "%s", syspath);
+  return (write(udev_monitor->fake_fds[1], &udev_device, sizeof(udev_device)));
+}
+
 static void *
 udev_monitor_thread(void *args) {
   struct udev_monitor *udev_monitor = args;
-  struct udev_device udev_device;
+  struct udev_filter_entry *fe;
   struct devq_event *ev;
-  const char *type, *dev_name;
+  const char *type, *dev_name, *action;
+  char syspath[sizeof(((struct udev_device *)0)->syspath)];
   size_t type_len, dev_len;
   int kq;
   struct kevent ke;
@@ -505,22 +517,25 @@ udev_monitor_thread(void *args) {
         break;
       type = get_devq_event_prop_value(ev, "type", &type_len);
       dev_name = get_devq_event_prop_value(ev, "cdev", &dev_len);
-      if (type == NULL || dev_name == NULL || dev_len > 26)
+      if (type == NULL || dev_name == NULL || dev_len > (sizeof(syspath) - 6))
         break;
       if (type_len == 6 && strncmp(type, "CREATE", type_len) == 0)
-        sprintf(udev_device.action, "add");
+        action = "add";
       else if (type_len == 7 && strncmp(type, "DESTROY", type_len) == 0)
-        sprintf(udev_device.action, "remove");
+        action = "remove";
       else
         break;
-      udev_device.refcount = 1;
-      memcpy(udev_device.syspath, "/dev/", 5);
-      memcpy(udev_device.syspath + 5, dev_name, dev_len);
-      udev_device.syspath[dev_len + 5] = 0;
-      if (strncmp(udev_device.syspath, "/dev/input/event", 16) != 0)
-        break;
-printf("%s %s\n", udev_device.action, udev_device.syspath);
-      write(udev_monitor->fake_fds[1], &udev_device, sizeof(udev_device));
+      memcpy(syspath, "/dev/", 5);
+      memcpy(syspath + 5, dev_name, dev_len);
+      syspath[dev_len + 5] = 0;
+
+      STAILQ_FOREACH(fe, &udev_monitor->filters, next)
+        if (fe->type == UDEV_FILTER_TYPE_SUBSYSTEM &&
+            fe->neg == 0 &&
+            strcmp(fe->expr, "input") == 0 &&
+            strncmp(syspath, "/dev/input/event", 16) == 0)
+          udev_monitor_send_device(udev_monitor, syspath, action);
+
       break;
     case DEVQ_UNKNOWN:
       break;
@@ -529,7 +544,6 @@ printf("%s %s\n", udev_device.action, udev_device.syspath);
     devq_event_free(ev);
   }
 
-  printf("thr exit\n");
   return NULL;
 }
 #endif
@@ -550,6 +564,7 @@ struct udev_monitor *udev_monitor_new_from_netlink(struct udev *udev,
   }
 
   u->refcount = 1;
+  STAILQ_INIT(&u->filters);
 
   return u;
 }
@@ -559,6 +574,14 @@ int udev_monitor_filter_add_match_subsystem_devtype(
     struct udev_monitor *udev_monitor, const char *subsystem,
     const char *devtype) {
   fprintf(stderr, "stub: udev_monitor_filter_add_match_subsystem_devtype\n");
+  struct udev_filter_entry *fe = calloc(1, sizeof(struct udev_filter_entry));
+  if (fe == NULL)
+    return -1;
+
+  fe->type = UDEV_FILTER_TYPE_SUBSYSTEM;
+  fe->neg = 0;
+  snprintf(fe->expr, sizeof(fe->expr), "%s", subsystem);
+  STAILQ_INSERT_TAIL(&udev_monitor->filters, fe, next);
   return 0;
 }
 
@@ -624,6 +647,7 @@ void udev_monitor_unref(struct udev_monitor *udev_monitor) {
 #endif
     close(udev_monitor->fake_fds[0]);
     close(udev_monitor->fake_fds[1]);
+    free_filters(&udev_monitor->filters);
     free(udev_monitor);
   }
 }

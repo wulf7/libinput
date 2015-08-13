@@ -50,6 +50,7 @@ struct udev_monitor {
   struct devq_evmon *evm;
 #endif
   int fake_fds[2];
+  struct udev_filter_head filters;
 };
 
 STAILQ_HEAD(udev_list_head, udev_list_entry);
