@@ -32,31 +32,40 @@
 
 #include "libinput-util.h"
 
+struct udev_device;
+void create_evdev_handler(struct udev_device *udev_device);
+
 struct subsystem {
   char *subsystem;
   char *syspath;
+  void (*create_handler)(struct udev_device *udev_device);
 };
 
 struct subsystem subsystems[] = {
-  { "input", "/dev/input/event" },
+  { "input", "/dev/input/event", create_evdev_handler },
 };
 
 #define	UNKNOWN_SUBSYSTEM	"#"
-
-struct udev_device {
-  int refcount;
-  char syspath[32];
-  char action[8];
-};
-
-struct udev {
-  int refcount;
-};
 
 struct udev_list_entry {
   char name[32];
   char value[32];
   STAILQ_ENTRY(udev_list_entry) next;
+};
+STAILQ_HEAD(udev_list_head, udev_list_entry);
+static int insert_list_entry(
+   struct udev_list_head *lhp, char const *name, char const *value);
+static void free_dev_list(struct udev_list_head *head);
+
+struct udev_device {
+  int refcount;
+  char syspath[32];
+  char action[8];
+  struct udev_list_head prop_list;
+};
+
+struct udev {
+  int refcount;
 };
 
 enum {
@@ -81,7 +90,6 @@ struct udev_monitor {
   struct udev_filter_head filters;
 };
 
-STAILQ_HEAD(udev_list_head, udev_list_entry);
 struct udev_enumerate {
   int refcount;
   struct udev_filter_head filters;
@@ -286,38 +294,35 @@ out:
   return fd;
 }
 
-LIBINPUT_EXPORT
-char const *udev_device_get_property_value(struct udev_device *dev,
-                                           char const *property) {
-  fprintf(stderr, "stub: udev_device_get_property_value %s\n", property);
+void
+create_evdev_handler(struct udev_device *dev) {
+  int opened = 0;
+  fprintf(stderr, "create_evdev_handler invoked on %p\n", dev);
 
-  if (strcmp("ID_INPUT", property) == 0) {
-    fprintf(stderr, "udev_device_get_property_value return 1\n");
-    return (char const *)1;
-  }
+  insert_list_entry(&dev->prop_list, "ID_INPUT", "1");
 
   int fd = path_to_fd(dev->syspath);
+  if (fd == -1) {
+    fd = open(dev->syspath, O_RDONLY | O_CLOEXEC);
+    opened = 1;
+  }
   if (fd == -1)
-    return NULL;
-
-  char const *retval = NULL;
+    return;
 
   struct libevdev *evdev = NULL;
   if (libevdev_new_from_fd(fd, &evdev) != 0) {
     fprintf(stderr,
             "udev_device_get_property_value: could not create evdev\n");
-    return NULL;
+    return;
   }
 
-  if (strcmp("ID_INPUT_TOUCHPAD", property) == 0) {
-    if (libevdev_has_event_code(evdev, EV_ABS, ABS_X) &&
-        libevdev_has_event_code(evdev, EV_ABS, ABS_Y) &&
-        libevdev_has_event_code(evdev, EV_KEY, BTN_TOOL_FINGER) &&
-        !libevdev_has_event_code(evdev, EV_KEY, BTN_STYLUS) &&
-        !libevdev_has_event_code(evdev, EV_KEY, BTN_TOOL_PEN)) {
-      retval = (char const *)1;
-    }
-  } else if (strcmp("ID_INPUT_TOUCHSCREEN", property) == 0) {
+  if (libevdev_has_event_code(evdev, EV_ABS, ABS_X) &&
+      libevdev_has_event_code(evdev, EV_ABS, ABS_Y) &&
+      libevdev_has_event_code(evdev, EV_KEY, BTN_TOOL_FINGER) &&
+      !libevdev_has_event_code(evdev, EV_KEY, BTN_STYLUS) &&
+      !libevdev_has_event_code(evdev, EV_KEY, BTN_TOOL_PEN)) {
+    insert_list_entry(&dev->prop_list, "ID_INPUT_TOUCHPAD", "1");
+  } else
     /* Its not rule of thumb but quite common that
      * touchscreens do not advertise BTN_TOOL_FINGER event */
     if (libevdev_has_event_code(evdev, EV_ABS, ABS_X) &&
@@ -326,23 +331,21 @@ char const *udev_device_get_property_value(struct udev_device *dev,
         !libevdev_has_event_code(evdev, EV_KEY, BTN_TOOL_FINGER) &&
         !libevdev_has_event_code(evdev, EV_KEY, BTN_STYLUS) &&
         !libevdev_has_event_code(evdev, EV_KEY, BTN_TOOL_PEN)) {
-      retval = (char const *)1;
-    }
-  } else if (strcmp("ID_INPUT_MOUSE", property) == 0) {
+      insert_list_entry(&dev->prop_list, "ID_INPUT_TOUCHSCREEN", "1");
+  } else
     if (libevdev_has_event_code(evdev, EV_REL, REL_X) &&
         libevdev_has_event_code(evdev, EV_REL, REL_Y) &&
         libevdev_has_event_code(evdev, EV_KEY, BTN_MOUSE)) {
-      retval = (char const *)1;
-    }
+      insert_list_entry(&dev->prop_list, "ID_INPUT_MOUSE", "1");
+  } else
     if (libevdev_has_event_code(evdev, EV_ABS, ABS_X) &&
         libevdev_has_event_code(evdev, EV_ABS, ABS_Y) &&
         !libevdev_has_event_code(evdev, EV_KEY, BTN_TOOL_FINGER) &&
         !libevdev_has_event_code(evdev, EV_KEY, BTN_STYLUS) &&
         !libevdev_has_event_code(evdev, EV_KEY, BTN_TOOL_PEN) &&
         libevdev_has_event_code(evdev, EV_KEY, BTN_MOUSE)) {
-      retval = (char const *)1;
-    }
-  } else if (strcmp("ID_INPUT_KEYBOARD", property) == 0) {
+      insert_list_entry(&dev->prop_list, "ID_INPUT_MOUSE", "1");
+  } else {
     bool is_keyboard = true;
     for (int i = KEY_ESC; i <= KEY_D; ++i) {
       if (!libevdev_has_event_code(evdev, EV_KEY, i)) {
@@ -351,15 +354,63 @@ char const *udev_device_get_property_value(struct udev_device *dev,
       }
     }
     if (is_keyboard)
-      retval = (char const *)1;
+      insert_list_entry(&dev->prop_list, "ID_INPUT_KEYBOARD", "1");
   }
 
   libevdev_free(evdev);
 
-  fprintf(stderr, "udev_device_get_property_value return %p\n",
-          (void *)retval);
+  if (opened)
+    close(fd);
+}
 
-  return retval;
+static void
+invoke_create_handler(struct udev_device *udev_device) {
+  const char *path;
+  size_t len, i;
+
+  path = udev_device_get_syspath(udev_device);
+  len = syspathlen_wo_units(path);
+  if (len == 0)
+    return;
+
+  for (i = 0; i < nitems(subsystems); i++) {
+    if (len == strlen(subsystems[i].syspath) &&
+        strncmp(path, subsystems[i].syspath, len) == 0 &&
+        subsystems[i].create_handler != NULL) {
+      subsystems[i].create_handler(udev_device);
+      break;
+    }
+  }
+  return;
+}
+
+LIBINPUT_EXPORT
+char const *udev_device_get_property_value(struct udev_device *dev,
+                                           char const *property) {
+  char const *key, *value;
+  struct udev_list_entry *entry;
+
+  udev_list_entry_foreach(entry, udev_device_get_properties_list_entry(dev)) {
+    key = udev_list_entry_get_name(entry);
+    if (!key)
+      continue;
+    if (strcmp(key, property) == 0) {
+      value = udev_list_entry_get_value(entry);
+      fprintf
+        (stderr, "udev_device_get_property_value %s:%s\n", property, value);
+      return value;
+    }
+  }
+
+  fprintf(stderr, "udev_device_get_property_value %s:NULL\n", property);
+
+  return NULL;
+}
+
+LIBINPUT_EXPORT
+struct udev_list_entry * udev_device_get_properties_list_entry(
+    struct udev_device *udev_device) {
+  return STAILQ_FIRST(&udev_device->prop_list);
 }
 
 LIBINPUT_EXPORT
@@ -377,6 +428,8 @@ struct udev_device *udev_device_new_from_syspath(struct udev *udev,
     u->refcount = 1;
     snprintf(u->syspath, sizeof(u->syspath), "%s", syspath);
     snprintf(u->action, sizeof(u->action), "none");
+    STAILQ_INIT(&u->prop_list);
+    invoke_create_handler(u);
     return u;
   }
   return NULL;
@@ -409,6 +462,7 @@ void udev_device_unref(struct udev_device *udev_device) {
 
   --udev_device->refcount;
   if (udev_device->refcount == 0) {
+    free_dev_list(&udev_device->prop_list);
     free(udev_device);
   }
 }
@@ -482,15 +536,16 @@ int udev_enumerate_add_match_subsystem(
   return 0;
 }
 
-static struct udev_list_entry *create_list_entry(char const *name,
-                                                 char const *value) {
+static int insert_list_entry(
+    struct udev_list_head *lhp, char const *name, char const *value) {
   struct udev_list_entry *le = calloc(1, sizeof(struct udev_list_entry));
   if (!le)
-    return NULL;
+    return -1;
   snprintf(le->name, sizeof(le->name), "%s", name);
   if (value != NULL)
     snprintf(le->value, sizeof(le->value), "%s", value);
-  return le;
+  STAILQ_INSERT_TAIL(lhp, le, next);
+  return 0;
 }
 
 static void free_filters(struct udev_filter_head *head) {
@@ -548,13 +603,10 @@ static int enumerate_devices_by_syspath(struct udev_list_head *lhp,
 
     snprintf(path, sizeof(path), "%s/%s", dirname, ent->d_name);
 
-    struct udev_list_entry *le = create_list_entry(path, NULL);
-    if (!le) {
+    if (insert_list_entry(lhp, path, NULL) == -1) {
       closedir(dir);
       return -1;
     }
-
-    STAILQ_INSERT_TAIL(lhp, le, next);
   }
 
   closedir(dir);
@@ -611,14 +663,14 @@ struct udev_list_entry *udev_list_entry_get_next(
 LIBINPUT_EXPORT
 const char *udev_list_entry_get_name(
     struct udev_list_entry *list_entry) {
-  fprintf(stderr, "udev_list_entry_get_name\n");
+//  fprintf(stderr, "udev_list_entry_get_name\n");
   return list_entry->name;
 }
 
 LIBINPUT_EXPORT
 const char *udev_list_entry_get_value(
     struct udev_list_entry *list_entry) {
-  fprintf(stderr, "udev_list_entry_get_value\n");
+//  fprintf(stderr, "udev_list_entry_get_value\n");
   return list_entry->value;
 }
 
@@ -814,6 +866,8 @@ struct udev_device *udev_monitor_receive_device(
   struct udev_device *udev_device = calloc(1, sizeof(*udev_device));
   if (read(udev_monitor->fake_fds[0], udev_device, sizeof(*udev_device)) > 0) {
     fprintf(stderr, " %s\n", udev_device->syspath);
+    STAILQ_INIT(&udev_device->prop_list);
+    invoke_create_handler(udev_device);
     return udev_device;
   }
   fprintf(stderr, "\n");

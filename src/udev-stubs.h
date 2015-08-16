@@ -16,6 +16,8 @@ struct udev_enumerate;
 
 char const *udev_device_get_devnode(struct udev_device *udev_device);
 char const *udev_device_get_property_value(struct udev_device *dummy __unused, char const *property);
+struct udev_list_entry * udev_device_get_properties_list_entry(
+    struct udev_device *udev_device);
 struct udev *udev_device_get_udev(struct udev_device *dummy __unused);
 struct udev_device *udev_device_new_from_syspath(struct udev *udev,
                                                         const char *syspath);
