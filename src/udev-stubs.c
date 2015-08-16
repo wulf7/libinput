@@ -54,7 +54,8 @@ struct udev {
 };
 
 struct udev_list_entry {
-  char path[32];
+  char name[32];
+  char value[32];
   STAILQ_ENTRY(udev_list_entry) next;
 };
 
@@ -481,11 +482,14 @@ int udev_enumerate_add_match_subsystem(
   return 0;
 }
 
-static struct udev_list_entry *create_list_entry(char const *path) {
+static struct udev_list_entry *create_list_entry(char const *name,
+                                                 char const *value) {
   struct udev_list_entry *le = calloc(1, sizeof(struct udev_list_entry));
   if (!le)
     return NULL;
-  snprintf(le->path, sizeof(le->path), "%s", path);
+  snprintf(le->name, sizeof(le->name), "%s", name);
+  if (value != NULL)
+    snprintf(le->value, sizeof(le->value), "%s", value);
   return le;
 }
 
@@ -544,7 +548,7 @@ static int enumerate_devices_by_syspath(struct udev_list_head *lhp,
 
     snprintf(path, sizeof(path), "%s/%s", dirname, ent->d_name);
 
-    struct udev_list_entry *le = create_list_entry(path);
+    struct udev_list_entry *le = create_list_entry(path, NULL);
     if (!le) {
       closedir(dir);
       return -1;
@@ -608,7 +612,14 @@ LIBINPUT_EXPORT
 const char *udev_list_entry_get_name(
     struct udev_list_entry *list_entry) {
   fprintf(stderr, "udev_list_entry_get_name\n");
-  return list_entry->path;
+  return list_entry->name;
+}
+
+LIBINPUT_EXPORT
+const char *udev_list_entry_get_value(
+    struct udev_list_entry *list_entry) {
+  fprintf(stderr, "udev_list_entry_get_value\n");
+  return list_entry->value;
 }
 
 LIBINPUT_EXPORT

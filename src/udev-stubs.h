@@ -43,6 +43,7 @@ struct udev_list_entry *udev_list_entry_get_next(
     struct udev_list_entry *list_entry);
 const char *udev_list_entry_get_name(
     struct udev_list_entry *list_entry);
+const char *udev_list_entry_get_value(struct udev_list_entry *list_entry);
 void udev_enumerate_unref(struct udev_enumerate *udev_enumerate);
 struct udev_monitor *udev_monitor_new_from_netlink(struct udev *udev,
                                                           const char *name);
