@@ -370,7 +370,7 @@ struct udev *udev_device_get_udev(struct udev_device *dummy __unused) {
 LIBINPUT_EXPORT
 struct udev_device *udev_device_new_from_syspath(struct udev *udev,
                                                         const char *syspath) {
-  fprintf(stderr, "stub: udev_list_entry_get_name\n");
+  fprintf(stderr, "stub: udev_device_new_from_syspath %s\n", syspath);
   struct udev_device *u = calloc(1, sizeof(struct udev_device));
   if (u) {
     u->refcount = 1;
