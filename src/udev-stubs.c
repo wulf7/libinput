@@ -32,6 +32,17 @@
 
 #include "libinput-util.h"
 
+struct subsystem {
+  char *subsystem;
+  char *syspath;
+};
+
+struct subsystem subsystems[] = {
+  { "input", "/dev/input/event" },
+};
+
+#define	UNKNOWN_SUBSYSTEM	"#"
+
 struct udev_device {
   int refcount;
   char syspath[32];
@@ -102,6 +113,103 @@ LIBINPUT_EXPORT
 char const *udev_device_get_devnode(struct udev_device *udev_device) {
   fprintf(stderr, "udev_device_get_devnode return %s\n", udev_device->syspath);
   return udev_device->syspath;
+}
+
+/*
+ * dirname_r implementation. Stolen here:
+ * https://android.googlesource.com/platform/bionic.git/+/gingerbread/libc/bionic/dirname_r.c
+ */
+static int
+dirname_r(const char *path, char *buffer, size_t bufflen)
+{
+  const char *endp;
+  int result, len;
+  /* Empty or NULL string gets treated as "." */
+  if (path == NULL || *path == '\0') {
+    path = ".";
+    len  = 1;
+    goto Exit;
+  }
+  /* Strip trailing slashes */
+  endp = path + strlen(path) - 1;
+  while (endp > path && *endp == '/')
+    endp--;
+  /* Find the start of the dir */
+  while (endp > path && *endp != '/')
+    endp--;
+  /* Either the dir is "/" or there are no slashes */
+  if (endp == path) {
+    path = (*endp == '/') ? "/" : ".";
+    len  = 1;
+    goto Exit;
+  }
+  do {
+    endp--;
+  } while (endp > path && *endp == '/');
+  len = endp - path +1;
+
+Exit:
+  result = len;
+  if (len+1 > MAXPATHLEN) {
+    errno = ENAMETOOLONG;
+    return -1;
+  }
+  if (buffer == NULL)
+    return result;
+  if (len > (int)bufflen-1) {
+    len    = (int)bufflen-1;
+    result = -1;
+    errno  = ERANGE;
+  }
+  if (len >= 0) {
+    memcpy(buffer, path, len);
+    buffer[len] = 0;
+  }
+  return result;
+}
+
+/*
+ * locates the occurrence of last component of the pathname
+ * pointed to by path
+ */
+static char *strbase(const char *path) {
+  char *base;
+
+  base = strrchr(path, '/');
+  if (base != NULL)
+    base++;
+
+  return base;
+}
+
+/*
+ */
+static size_t
+syspathlen_wo_units(const char *path) {
+  size_t len;
+
+  len = strlen(path);
+  while (len > 0) {
+    if (!((path[len-1] >= '0' && path[len-1] <= '9') || path[len-1] == '.'))
+      break;
+    --len;
+  }
+
+  return len;
+}
+
+static char *
+get_subsystem_by_syspath(const char *path) {
+  size_t len, i;
+
+  len = syspathlen_wo_units(path);
+
+  for (i = 0; i < nitems(subsystems); i++)
+    if (len == strlen(subsystems[i].syspath) &&
+        strncmp(path, subsystems[i].syspath, len) == 0)
+      return subsystems[i].subsystem;
+
+  return UNKNOWN_SUBSYSTEM;
 }
 
 static int
@@ -282,8 +390,8 @@ const char *udev_device_get_syspath(struct udev_device *udev_device) {
 LIBINPUT_EXPORT
 const char *udev_device_get_sysname(struct udev_device *udev_device) {
   fprintf(stderr, "udev_device_get_sysname return %s\n",
-          udev_device->syspath + 11);
-  return udev_device->syspath + 11;
+          strbase(udev_device->syspath));
+  return strbase(udev_device->syspath);
 }
 
 LIBINPUT_EXPORT
@@ -405,35 +513,59 @@ static void free_dev_list(struct udev_list_head *head) {
   STAILQ_INIT(head);
 }
 
-static int enumerate_input_devices(struct udev_list_head *lh) {
+static int enumerate_devices_by_syspath(struct udev_list_head *lhp,
+                                        const char *syspath) {
 
   DIR *dir;
   struct dirent *ent;
-  char path[32];
+  char path[32], dirname[32], *basename;
+  size_t basename_len;
 
-  dir = opendir("/dev/input");
-  if (dir == NULL) {
+  if (dirname_r(syspath, dirname, sizeof(dirname)) < 4 ||
+      strncmp(dirname, "/dev", 4) != 0)
     return -1;
-  }
+
+  basename = strbase(syspath);
+  if (basename == NULL)
+    return -1;
+  basename_len = strlen(basename);
+
+  dir = opendir(dirname);
+  if (dir == NULL)
+    return errno == ENOENT ? 0 : -1;
+
   while ((ent = readdir(dir)) != NULL) {
     if (!strcmp(ent->d_name, ".") || !strcmp(ent->d_name, "..") ||
-        ent->d_type != DT_CHR || strncmp(ent->d_name, "event", 5) != 0) {
+        ent->d_type != DT_CHR ||
+        syspathlen_wo_units(ent->d_name) != basename_len ||
+        strncmp(ent->d_name, basename, basename_len) != 0) {
       continue;
     }
 
-    snprintf(path, sizeof(path), "/dev/input/%s", ent->d_name);
+    snprintf(path, sizeof(path), "%s/%s", dirname, ent->d_name);
 
     struct udev_list_entry *le = create_list_entry(path);
     if (!le) {
-      free_dev_list(lh);
       closedir(dir);
       return -1;
     }
 
-    STAILQ_INSERT_TAIL(lh, le, next);
+    STAILQ_INSERT_TAIL(lhp, le, next);
   }
 
   closedir(dir);
+  return 0;
+}
+
+static int enumerate_devices_by_subsystem(struct udev_list_head *lhp,
+                                       char *subsystem) {
+  size_t i;
+
+  for (i = 0; i < nitems(subsystems); i++)
+    if (strcmp(subsystems[i].subsystem, subsystem) == 0)
+      if (enumerate_devices_by_syspath(lhp, subsystems[i].syspath) == -1)
+        return -1;
+
   return 0;
 }
 
@@ -446,10 +578,8 @@ int udev_enumerate_scan_devices(struct udev_enumerate *udev_enumerate) {
 
   free_dev_list(&udev_enumerate->dev_list);
   STAILQ_FOREACH(fe, &udev_enumerate->filters, next) {
-    if (fe->type == UDEV_FILTER_TYPE_SUBSYSTEM &&
-        fe->neg == 0 &&
-        strcmp(fe->expr, "input") == 0) {
-      if (enumerate_input_devices(&lh) != 0)
+    if (fe->type == UDEV_FILTER_TYPE_SUBSYSTEM && fe->neg == 0) {
+      if (enumerate_devices_by_subsystem(&lh, fe->expr) != 0)
         goto error;
       STAILQ_CONCAT(&udev_enumerate->dev_list, &lh);
     }
@@ -457,6 +587,7 @@ int udev_enumerate_scan_devices(struct udev_enumerate *udev_enumerate) {
   return 0;
 
 error:
+  free_dev_list(&lh);
   free_dev_list(&udev_enumerate->dev_list);
   return -1;
 }
@@ -541,7 +672,7 @@ udev_monitor_thread(void *args) {
   struct udev_monitor *udev_monitor = args;
   struct udev_filter_entry *fe;
   struct devq_event *ev;
-  const char *type, *dev_name, *action;
+  const char *type, *dev_name, *action, *subsystem;
   char syspath[sizeof(((struct udev_device *)0)->syspath)];
   size_t type_len, dev_len;
   int kq;
@@ -581,12 +712,14 @@ udev_monitor_thread(void *args) {
       memcpy(syspath, "/dev/", 5);
       memcpy(syspath + 5, dev_name, dev_len);
       syspath[dev_len + 5] = 0;
+      subsystem = get_subsystem_by_syspath(syspath);
+      if (strcmp(subsystem, UNKNOWN_SUBSYSTEM) == 0)
+        break;
 
       STAILQ_FOREACH(fe, &udev_monitor->filters, next)
         if (fe->type == UDEV_FILTER_TYPE_SUBSYSTEM &&
             fe->neg == 0 &&
-            strcmp(fe->expr, "input") == 0 &&
-            strncmp(syspath, "/dev/input/event", 16) == 0)
+            strcmp(fe->expr, subsystem) == 0)
           udev_monitor_send_device(udev_monitor, syspath, action);
 
       break;
