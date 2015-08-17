@@ -35,13 +35,13 @@
 struct udev_device;
 void create_evdev_handler(struct udev_device *udev_device);
 
-struct subsystem {
+struct subsystem_config {
   char *subsystem;
   char *syspath;
   void (*create_handler)(struct udev_device *udev_device);
 };
 
-struct subsystem subsystems[] = {
+struct subsystem_config subsystems[] = {
   { "input", "/dev/input/event", create_evdev_handler },
 };
 
@@ -207,8 +207,8 @@ syspathlen_wo_units(const char *path) {
   return len;
 }
 
-static char *
-get_subsystem_by_syspath(const char *path) {
+static struct subsystem_config *
+get_subsystem_config_by_syspath(const char *path) {
   size_t len, i;
 
   len = syspathlen_wo_units(path);
@@ -216,9 +216,17 @@ get_subsystem_by_syspath(const char *path) {
   for (i = 0; i < nitems(subsystems); i++)
     if (len == strlen(subsystems[i].syspath) &&
         strncmp(path, subsystems[i].syspath, len) == 0)
-      return subsystems[i].subsystem;
+      return &subsystems[i];
 
-  return UNKNOWN_SUBSYSTEM;
+  return NULL;
+}
+
+static char *
+get_subsystem_by_syspath(const char *path) {
+  struct subsystem_config *sc;
+
+  sc = get_subsystem_config_by_syspath(path);
+  return sc == NULL ? UNKNOWN_SUBSYSTEM : sc->subsystem;
 }
 
 static int
@@ -366,21 +374,14 @@ create_evdev_handler(struct udev_device *dev) {
 static void
 invoke_create_handler(struct udev_device *udev_device) {
   const char *path;
-  size_t len, i;
+  struct subsystem_config *sc;
 
   path = udev_device_get_syspath(udev_device);
-  len = syspathlen_wo_units(path);
-  if (len == 0)
-    return;
+  sc = get_subsystem_config_by_syspath(path);
 
-  for (i = 0; i < nitems(subsystems); i++) {
-    if (len == strlen(subsystems[i].syspath) &&
-        strncmp(path, subsystems[i].syspath, len) == 0 &&
-        subsystems[i].create_handler != NULL) {
-      subsystems[i].create_handler(udev_device);
-      break;
-    }
-  }
+  if (sc != NULL && sc->create_handler != NULL)
+    sc->create_handler(udev_device);
+
   return;
 }
 
