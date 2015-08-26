@@ -45,6 +45,8 @@ struct subsystem_config subsystems[] = {
   { "input", "/dev/input/event", create_evdev_handler },
 };
 
+#define	sizeof_field(x, field) sizeof(((struct x *)0)->field)
+
 #define	UNKNOWN_SUBSYSTEM	"#"
 
 /* udev_device flags */
@@ -101,7 +103,6 @@ struct udev_enumerate {
   struct udev_filter_head filters;
   struct udev_list_head dev_list;
 };
-
 
 LIBINPUT_EXPORT
 struct udev_device *udev_device_new_from_devnum(struct udev *udev, char type,
@@ -426,20 +427,25 @@ struct udev *udev_device_get_udev(struct udev_device *dummy __unused) {
   return NULL;
 }
 
-LIBINPUT_EXPORT
-struct udev_device *udev_device_new_from_syspath(struct udev *udev,
-                                                        const char *syspath) {
-  fprintf(stderr, "stub: udev_device_new_from_syspath %s\n", syspath);
+static struct udev_device *udev_device_new_common(
+    const char *syspath, uint32_t flags) {
   struct udev_device *u = calloc(1, sizeof(struct udev_device));
   if (u) {
     u->refcount = 1;
     snprintf(u->syspath, sizeof(u->syspath), "%s", syspath);
-    u->flags = UDF_ACTION_NONE;
+    u->flags = flags;
     STAILQ_INIT(&u->prop_list);
     invoke_create_handler(u);
     return u;
   }
   return NULL;
+}
+
+LIBINPUT_EXPORT
+struct udev_device *udev_device_new_from_syspath(struct udev *udev,
+                                                        const char *syspath) {
+  fprintf(stderr, "stub: udev_device_new_from_syspath %s\n", syspath);
+  return udev_device_new_common(syspath, UDF_ACTION_NONE);
 }
 
 LIBINPUT_EXPORT
@@ -729,12 +735,16 @@ devq_event_match_value(struct devq_event *ev, const char *prop, const char *matc
 static int
 udev_monitor_send_device(struct udev_monitor *udev_monitor,
                          const char *syspath, uint32_t flags) {
-  struct udev_device udev_device;
 
-  udev_device.refcount = 1;
-  udev_device.flags = flags;
-  snprintf(udev_device.syspath, sizeof(udev_device.syspath), "%s", syspath);
-  return (write(udev_monitor->fake_fds[1], &udev_device, sizeof(udev_device)));
+  char buf[sizeof_field(udev_device, syspath) + 1];
+  size_t len;
+
+  len = strlen(syspath);
+  if (len >= sizeof_field(udev_device, syspath))
+    return -1;
+  buf[0] = (char)flags;
+  snprintf(buf + 1, sizeof_field(udev_device, syspath), "%s", syspath);
+  return (write(udev_monitor->fake_fds[1], buf, len + 2));
 }
 
 static void *
@@ -744,7 +754,7 @@ udev_monitor_thread(void *args) {
   struct devq_event *ev;
   const char *type, *dev_name, *subsystem;
   uint32_t flags;
-  char syspath[sizeof(((struct udev_device *)0)->syspath)];
+  char syspath[sizeof_field(udev_device, syspath)];
   size_t type_len, dev_len;
   int kq;
   struct kevent ke;
@@ -871,16 +881,19 @@ LIBINPUT_EXPORT
 struct udev_device *udev_monitor_receive_device(
     struct udev_monitor *udev_monitor) {
   fprintf(stderr, "udev_monitor_receive_device");
-  struct udev_device *udev_device = calloc(1, sizeof(*udev_device));
-  if (read(udev_monitor->fake_fds[0], udev_device, sizeof(*udev_device)) > 0) {
-    fprintf(stderr, " %s\n", udev_device->syspath);
-    STAILQ_INIT(&udev_device->prop_list);
-    invoke_create_handler(udev_device);
-    return udev_device;
+  char buf[sizeof_field(udev_device, syspath) + 1];
+  size_t pos;
+
+  for (pos = 0; pos < sizeof(buf); ++pos) {
+    if (read(udev_monitor->fake_fds[0], buf+pos, 1) < 1)
+      return NULL;
+
+    if (buf[pos] == 0)
+      break;
   }
-  fprintf(stderr, "\n");
-  free(udev_device);
-  return NULL;
+
+  fprintf(stderr, " %s\n", buf+1);
+  return (udev_device_new_common(buf+1, buf[0]));
 }
 
 LIBINPUT_EXPORT
