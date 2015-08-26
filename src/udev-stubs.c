@@ -47,6 +47,12 @@ struct subsystem_config subsystems[] = {
 
 #define	UNKNOWN_SUBSYSTEM	"#"
 
+/* udev_device flags */
+#define	UDF_ACTION_MASK		0x00000003 /* Should be in range 0x00 - 0xFF */
+#define	UDF_ACTION_NONE		0x00000000
+#define	UDF_ACTION_ADD		0x00000001
+#define	UDF_ACTION_REMOVE	0x00000002
+
 struct udev_list_entry {
   char name[32];
   char value[32];
@@ -60,7 +66,7 @@ static void free_dev_list(struct udev_list_head *head);
 struct udev_device {
   int refcount;
   char syspath[32];
-  char action[8];
+  uint32_t flags;
   struct udev_list_head prop_list;
 };
 
@@ -428,7 +434,7 @@ struct udev_device *udev_device_new_from_syspath(struct udev *udev,
   if (u) {
     u->refcount = 1;
     snprintf(u->syspath, sizeof(u->syspath), "%s", syspath);
-    snprintf(u->action, sizeof(u->action), "none");
+    u->flags = UDF_ACTION_NONE;
     STAILQ_INIT(&u->prop_list);
     invoke_create_handler(u);
     return u;
@@ -722,11 +728,11 @@ devq_event_match_value(struct devq_event *ev, const char *prop, const char *matc
 
 static int
 udev_monitor_send_device(struct udev_monitor *udev_monitor,
-                         const char *syspath, const char *action) {
+                         const char *syspath, uint32_t flags) {
   struct udev_device udev_device;
 
   udev_device.refcount = 1;
-  snprintf(udev_device.action, sizeof(udev_device.action), "%s", action);
+  udev_device.flags = flags;
   snprintf(udev_device.syspath, sizeof(udev_device.syspath), "%s", syspath);
   return (write(udev_monitor->fake_fds[1], &udev_device, sizeof(udev_device)));
 }
@@ -736,7 +742,8 @@ udev_monitor_thread(void *args) {
   struct udev_monitor *udev_monitor = args;
   struct udev_filter_entry *fe;
   struct devq_event *ev;
-  const char *type, *dev_name, *action, *subsystem;
+  const char *type, *dev_name, *subsystem;
+  uint32_t flags;
   char syspath[sizeof(((struct udev_device *)0)->syspath)];
   size_t type_len, dev_len;
   int kq;
@@ -768,9 +775,9 @@ udev_monitor_thread(void *args) {
       if (type == NULL || dev_name == NULL || dev_len > (sizeof(syspath) - 6))
         break;
       if (type_len == 6 && strncmp(type, "CREATE", type_len) == 0)
-        action = "add";
+        flags = UDF_ACTION_ADD;
       else if (type_len == 7 && strncmp(type, "DESTROY", type_len) == 0)
-        action = "remove";
+        flags = UDF_ACTION_REMOVE;
       else
         break;
       memcpy(syspath, "/dev/", 5);
@@ -784,7 +791,7 @@ udev_monitor_thread(void *args) {
         if (fe->type == UDEV_FILTER_TYPE_SUBSYSTEM &&
             fe->neg == 0 &&
             strcmp(fe->expr, subsystem) == 0)
-          udev_monitor_send_device(udev_monitor, syspath, action);
+          udev_monitor_send_device(udev_monitor, syspath, flags);
 
       break;
     case DEVQ_UNKNOWN:
@@ -878,8 +885,22 @@ struct udev_device *udev_monitor_receive_device(
 
 LIBINPUT_EXPORT
 const char *udev_device_get_action(struct udev_device *udev_device) {
-  fprintf(stderr, "udev_device_get_action return %s\n", udev_device->action);
-  return udev_device->action;
+  const char *action;
+  switch(udev_device->flags & UDF_ACTION_MASK) {
+  case UDF_ACTION_NONE:
+    action = "none";
+    break;
+  case UDF_ACTION_ADD:
+    action = "add";
+    break;
+  case UDF_ACTION_REMOVE:
+    action = "remove";
+    break;
+  default:
+    action = "unknown";
+  }
+  fprintf(stderr, "udev_device_get_action return %s\n", action);
+  return action;
 }
 
 LIBINPUT_EXPORT
