@@ -422,6 +422,13 @@ struct udev_list_entry * udev_device_get_properties_list_entry(
 }
 
 LIBINPUT_EXPORT
+char const *udev_device_get_sysattr_value(
+    struct udev_device *udev_device, const char *sysattr) {
+  fprintf(stderr, "udev_device_get_sysattr_value %s\n", sysattr);
+  return NULL;
+}
+
+LIBINPUT_EXPORT
 struct udev *udev_device_get_udev(struct udev_device *dummy __unused) {
   fprintf(stderr, "stub: udev_device_get_udev\n");
   return NULL;
