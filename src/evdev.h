@@ -227,6 +227,7 @@ struct evdev_device {
 
 	int dpi; /* HW resolution */
 	struct ratelimit syn_drop_limit; /* ratelimit for SYN_DROPPED logging */
+	struct ratelimit nonpointer_rel_limit; /* ratelimit for REL_* events from non-pointer devices */
 
 	uint32_t model_flags;
 };
@@ -285,7 +286,7 @@ evdev_device_create(struct libinput_seat *seat,
 
 int
 evdev_device_init_pointer_acceleration(struct evdev_device *device,
-				       accel_profile_func_t profile);
+				       struct motion_filter *filter);
 
 struct evdev_dispatch *
 evdev_touchpad_create(struct evdev_device *device);
