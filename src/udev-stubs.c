@@ -442,7 +442,8 @@ static struct udev_device *udev_device_new_common(
     snprintf(u->syspath, sizeof(u->syspath), "%s", syspath);
     u->flags = flags;
     STAILQ_INIT(&u->prop_list);
-    invoke_create_handler(u);
+    if ((flags & UDF_ACTION_MASK) != UDF_ACTION_REMOVE)
+      invoke_create_handler(u);
     return u;
   }
   return NULL;
