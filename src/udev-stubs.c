@@ -462,6 +462,13 @@ const char *udev_device_get_sysname(struct udev_device *udev_device) {
 }
 
 LIBINPUT_EXPORT
+const char *udev_device_get_subsystem(struct udev_device *udev_device) {
+  const char *ss = get_subsystem_by_syspath(udev_device_get_syspath(udev_device));
+  fprintf(stderr, "udev_device_get_subsystem return %s\n", ss);
+  return ss;
+}
+
+LIBINPUT_EXPORT
 struct udev_device *udev_device_ref(struct udev_device *udev_device) {
   fprintf(stderr, "udev_device_ref\n");
   ++udev_device->refcount;

@@ -30,6 +30,7 @@ void udev_unref(struct udev *udev);
 
 const char *udev_device_get_syspath(struct udev_device *udev_device);
 const char *udev_device_get_sysname(struct udev_device *udev_device);
+const char *udev_device_get_subsystem(struct udev_device *udev_device);
 struct udev_device *udev_device_ref(struct udev_device *udev_device);
 void udev_device_unref(struct udev_device *udev_device);
 struct udev_device *udev_device_get_parent(struct udev_device *udev_device);
