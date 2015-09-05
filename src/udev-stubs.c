@@ -952,3 +952,9 @@ void udev_monitor_unref(struct udev_monitor *udev_monitor) {
     free(udev_monitor);
   }
 }
+
+LIBINPUT_EXPORT
+struct udev *udev_monitor_get_udev(struct udev_monitor *dummy __unused) {
+  fprintf(stderr, "stub: udev_monitor_get_udev\n");
+  return NULL;
+}

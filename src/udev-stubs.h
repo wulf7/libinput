@@ -61,5 +61,6 @@ struct udev_device *udev_monitor_receive_device(
     struct udev_monitor *udev_monitor);
 const char *udev_device_get_action(struct udev_device *udev_device);
 void udev_monitor_unref(struct udev_monitor *udev_monitor);
+struct udev *udev_monitor_get_udev(struct udev_monitor *dummy __unused);
 
 #endif
