@@ -78,6 +78,7 @@ struct udev {
 
 enum {
   UDEV_FILTER_TYPE_SUBSYSTEM,
+  UDEV_FILTER_TYPE_SYSNAME,
 };
 
 struct udev_filter_entry {
@@ -549,19 +550,35 @@ struct udev_enumerate *udev_enumerate_new(struct udev *udev) {
   return NULL;
 }
 
-LIBINPUT_EXPORT
-int udev_enumerate_add_match_subsystem(
-    struct udev_enumerate *udev_enumerate, const char *subsystem) {
+static
+int udev_filter_add(struct udev_filter_head *filters,
+  int type, int neg, const char *expr) {
   fprintf(stderr, "stub: udev_enumerate_add_match_subsystem\n");
   struct udev_filter_entry *fe = calloc(1, sizeof(struct udev_filter_entry));
   if (fe == NULL)
     return -1;
 
-  fe->type = UDEV_FILTER_TYPE_SUBSYSTEM;
-  fe->neg = 0;
-  snprintf(fe->expr, sizeof(fe->expr), "%s", subsystem);
-  STAILQ_INSERT_TAIL(&udev_enumerate->filters, fe, next);
+  fe->type = type;
+  fe->neg = neg;
+  snprintf(fe->expr, sizeof(fe->expr), "%s", expr);
+  STAILQ_INSERT_TAIL(filters, fe, next);
   return 0;
+}
+
+LIBINPUT_EXPORT
+int udev_enumerate_add_match_subsystem(
+    struct udev_enumerate *udev_enumerate, const char *subsystem) {
+  fprintf(stderr, "stub: udev_enumerate_add_match_subsystem\n");
+  return udev_filter_add(
+    &udev_enumerate->filters, UDEV_FILTER_TYPE_SUBSYSTEM, 0, subsystem);
+}
+
+LIBINPUT_EXPORT
+int udev_enumerate_add_match_sysname(
+    struct udev_enumerate *udev_enumerate, const char *sysname) {
+  fprintf(stderr, "stub: udev_enumerate_add_match_sysname\n");
+  return udev_filter_add(
+    &udev_enumerate->filters, UDEV_FILTER_TYPE_SYSNAME, 0, sysname);
 }
 
 static int insert_list_entry(
@@ -856,15 +873,8 @@ int udev_monitor_filter_add_match_subsystem_devtype(
     struct udev_monitor *udev_monitor, const char *subsystem,
     const char *devtype) {
   fprintf(stderr, "stub: udev_monitor_filter_add_match_subsystem_devtype\n");
-  struct udev_filter_entry *fe = calloc(1, sizeof(struct udev_filter_entry));
-  if (fe == NULL)
-    return -1;
-
-  fe->type = UDEV_FILTER_TYPE_SUBSYSTEM;
-  fe->neg = 0;
-  snprintf(fe->expr, sizeof(fe->expr), "%s", subsystem);
-  STAILQ_INSERT_TAIL(&udev_monitor->filters, fe, next);
-  return 0;
+  return udev_filter_add(
+    &udev_monitor->filters, UDEV_FILTER_TYPE_SUBSYSTEM, 0, subsystem);
 }
 
 LIBINPUT_EXPORT

@@ -41,6 +41,8 @@ struct udev *udev_ref(struct udev *udev);
 struct udev_enumerate *udev_enumerate_new(struct udev *udev);
 int udev_enumerate_add_match_subsystem(
     struct udev_enumerate *udev_enumerate, const char *subsystem);
+int udev_enumerate_add_match_sysname(
+    struct udev_enumerate *udev_enumerate, const char *sysname);
 int udev_enumerate_scan_devices(struct udev_enumerate *udev_enumerate);
 struct udev_list_entry *udev_enumerate_get_list_entry(
     struct udev_enumerate *udev_enumerate);
