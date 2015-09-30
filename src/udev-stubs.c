@@ -566,7 +566,7 @@ static void free_dev_list(struct udev_list_head *head) {
 }
 
 static int
-insert_dev_list_entry(struct udev_enumerate *udev_enumerate, const char *syspath) {
+udev_filter_match(struct udev_filter_head *ufh, const char *syspath) {
   struct udev_filter_entry *fe;
   const char *subsystem;
 
@@ -574,12 +574,12 @@ insert_dev_list_entry(struct udev_enumerate *udev_enumerate, const char *syspath
   if (strcmp(subsystem, UNKNOWN_SUBSYSTEM) == 0)
     return 0;
 
-  STAILQ_FOREACH(fe, &udev_enumerate->filters, next)
+  STAILQ_FOREACH(fe, ufh, next)
     if (fe->type == UDEV_FILTER_TYPE_SUBSYSTEM &&
         fe->neg == 0 &&
         strcmp(fe->expr, subsystem) == 0)
-      if (insert_list_entry(&udev_enumerate->dev_list, syspath, NULL) == -1)
-        return -1;
+      return 1;
+
   return 0;
 }
 
@@ -621,7 +621,9 @@ devpath_scan_sub(struct udev_enumerate *udev_enumerate, char *path, int off, int
     case DT_LNK:
     case DT_CHR:
       /* add device, if any */
-      insert_dev_list_entry(udev_enumerate, path);
+      if (udev_filter_match(&udev_enumerate->filters, path) &&
+          insert_list_entry(&udev_enumerate->dev_list, path, NULL) == -1)
+        return -1;
       break;
     default:
       break;
@@ -737,9 +739,8 @@ udev_monitor_send_device(struct udev_monitor *udev_monitor,
 static void *
 udev_monitor_thread(void *args) {
   struct udev_monitor *udev_monitor = args;
-  struct udev_filter_entry *fe;
   struct devq_event *ev;
-  const char *type, *dev_name, *subsystem;
+  const char *type, *dev_name;
   uint32_t flags;
   char syspath[sizeof_field(udev_device, syspath)];
   size_t type_len, dev_len;
@@ -780,16 +781,8 @@ udev_monitor_thread(void *args) {
       memcpy(syspath, "/dev/", 5);
       memcpy(syspath + 5, dev_name, dev_len);
       syspath[dev_len + 5] = 0;
-      subsystem = get_subsystem_by_syspath(syspath);
-      if (strcmp(subsystem, UNKNOWN_SUBSYSTEM) == 0)
-        break;
-
-      STAILQ_FOREACH(fe, &udev_monitor->filters, next)
-        if (fe->type == UDEV_FILTER_TYPE_SUBSYSTEM &&
-            fe->neg == 0 &&
-            strcmp(fe->expr, subsystem) == 0)
-          udev_monitor_send_device(udev_monitor, syspath, flags);
-
+      if (udev_filter_match(&udev_monitor->filters, syspath))
+        udev_monitor_send_device(udev_monitor, syspath, flags);
       break;
     case DEVQ_UNKNOWN:
       break;
