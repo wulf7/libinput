@@ -134,59 +134,6 @@ char const *udev_device_get_devnode(struct udev_device *udev_device) {
 }
 
 /*
- * dirname_r implementation. Stolen here:
- * https://android.googlesource.com/platform/bionic.git/+/gingerbread/libc/bionic/dirname_r.c
- */
-static int
-dirname_r(const char *path, char *buffer, size_t bufflen)
-{
-  const char *endp;
-  int result, len;
-  /* Empty or NULL string gets treated as "." */
-  if (path == NULL || *path == '\0') {
-    path = ".";
-    len  = 1;
-    goto Exit;
-  }
-  /* Strip trailing slashes */
-  endp = path + strlen(path) - 1;
-  while (endp > path && *endp == '/')
-    endp--;
-  /* Find the start of the dir */
-  while (endp > path && *endp != '/')
-    endp--;
-  /* Either the dir is "/" or there are no slashes */
-  if (endp == path) {
-    path = (*endp == '/') ? "/" : ".";
-    len  = 1;
-    goto Exit;
-  }
-  do {
-    endp--;
-  } while (endp > path && *endp == '/');
-  len = endp - path +1;
-
-Exit:
-  result = len;
-  if (len+1 > MAXPATHLEN) {
-    errno = ENAMETOOLONG;
-    return -1;
-  }
-  if (buffer == NULL)
-    return result;
-  if (len > (int)bufflen-1) {
-    len    = (int)bufflen-1;
-    result = -1;
-    errno  = ERANGE;
-  }
-  if (len >= 0) {
-    memcpy(buffer, path, len);
-    buffer[len] = 0;
-  }
-  return result;
-}
-
-/*
  * locates the occurrence of last component of the pathname
  * pointed to by path
  */
@@ -618,80 +565,87 @@ static void free_dev_list(struct udev_list_head *head) {
   STAILQ_INIT(head);
 }
 
-static int enumerate_devices_by_syspath(struct udev_list_head *lhp,
-                                        const char *syspath) {
+static int
+insert_dev_list_entry(struct udev_enumerate *udev_enumerate, const char *syspath) {
+  struct udev_filter_entry *fe;
+  const char *subsystem;
 
+  subsystem = get_subsystem_by_syspath(syspath);
+  if (strcmp(subsystem, UNKNOWN_SUBSYSTEM) == 0)
+    return 0;
+
+  STAILQ_FOREACH(fe, &udev_enumerate->filters, next)
+    if (fe->type == UDEV_FILTER_TYPE_SUBSYSTEM &&
+        fe->neg == 0 &&
+        strcmp(fe->expr, subsystem) == 0)
+      if (insert_list_entry(&udev_enumerate->dev_list, syspath, NULL) == -1)
+        return -1;
+  return 0;
+}
+
+static int
+devpath_scan_sub(struct udev_enumerate *udev_enumerate, char *path, int off, int rem)
+{
   DIR *dir;
   struct dirent *ent;
-  char path[32], dirname[32], *basename;
-  size_t basename_len;
 
-  if (dirname_r(syspath, dirname, sizeof(dirname)) < 4 ||
-      strncmp(dirname, "/dev", 4) != 0)
-    return -1;
-
-  basename = strbase(syspath);
-  if (basename == NULL)
-    return -1;
-  basename_len = strlen(basename);
-
-  dir = opendir(dirname);
+  dir = opendir(path);
   if (dir == NULL)
     return errno == ENOENT ? 0 : -1;
 
   while ((ent = readdir(dir)) != NULL) {
-    if (!strcmp(ent->d_name, ".") || !strcmp(ent->d_name, "..") ||
-        ent->d_type != DT_CHR ||
-        syspathlen_wo_units(ent->d_name) != basename_len ||
-        strncmp(ent->d_name, basename, basename_len) != 0) {
+    if (strcmp(ent->d_name, ".") == 0 ||
+        strcmp(ent->d_name, "..") == 0)
       continue;
+    int len = strlen(ent->d_name);
+    if (len > rem)
+      continue;
+    strcpy(path + off, ent->d_name);
+    off += len;
+    rem -= len;
+    switch (ent->d_type) {
+    case DT_DIR:
+      if (rem < 1)
+        break;
+      path[off] = '/';
+      path[off+1] = '\0';
+      off++;
+      rem--;
+      /* recurse */
+      devpath_scan_sub(udev_enumerate, path, off, rem);
+      off--;
+      rem++;
+      break;
+    case DT_SOCK:
+    case DT_FIFO:
+    case DT_LNK:
+    case DT_CHR:
+      /* add device, if any */
+      insert_dev_list_entry(udev_enumerate, path);
+      break;
+    default:
+      break;
     }
-
-    snprintf(path, sizeof(path), "%s/%s", dirname, ent->d_name);
-
-    if (insert_list_entry(lhp, path, NULL) == -1) {
-      closedir(dir);
-      return -1;
-    }
+    off -= len;
+    rem += len;
   }
-
   closedir(dir);
-  return 0;
-}
-
-static int enumerate_devices_by_subsystem(struct udev_list_head *lhp,
-                                       char *subsystem) {
-  size_t i;
-
-  for (i = 0; i < nitems(subsystems); i++)
-    if (strcmp(subsystems[i].subsystem, subsystem) == 0)
-      if (enumerate_devices_by_syspath(lhp, subsystems[i].syspath) == -1)
-        return -1;
-
   return 0;
 }
 
 LIBINPUT_EXPORT
 int udev_enumerate_scan_devices(struct udev_enumerate *udev_enumerate) {
-  struct udev_filter_entry *fe;
-  struct udev_list_head lh = STAILQ_HEAD_INITIALIZER(lh);
-
+  char path[PATH_MAX + 1];
+  int ret;
   fprintf(stderr, "udev_enumerate_scan_devices\n");
 
   free_dev_list(&udev_enumerate->dev_list);
-  STAILQ_FOREACH(fe, &udev_enumerate->filters, next) {
-    if (fe->type == UDEV_FILTER_TYPE_SUBSYSTEM && fe->neg == 0) {
-      if (enumerate_devices_by_subsystem(&lh, fe->expr) != 0)
-        goto error;
-      STAILQ_CONCAT(&udev_enumerate->dev_list, &lh);
-    }
-  }
-  return 0;
+  strlcpy(path, "/dev/", sizeof(path));
 
-error:
-  free_dev_list(&lh);
-  free_dev_list(&udev_enumerate->dev_list);
-  return -1;
+  ret = devpath_scan_sub(udev_enumerate, path, strlen(path), PATH_MAX - strlen(path));
+  if (ret == -1)
+     free_dev_list(&udev_enumerate->dev_list);
+  return ret;
 }
 
 LIBINPUT_EXPORT
