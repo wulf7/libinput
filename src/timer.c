@@ -74,13 +74,14 @@ libinput_timer_arm_timer_fd(struct libinput *libinput)
 	uint64_t now = libinput_now(timer->libinput);
 	struct kevent chlist[3];
 	int nchanges = 0;
-	EV_SET(&chlist[nchanges++], (uintptr_t) libinput, EVFILT_TIMER, EV_ADD, 0, 0, 0);
-	EV_SET(&chlist[nchanges++], (uintptr_t) libinput, EVFILT_TIMER, EV_DELETE, 0, 0, 0);
+	EV_SET(&chlist[nchanges++], 0, EVFILT_TIMER, EV_ADD, 0, 0, 0);
+	EV_SET(&chlist[nchanges++], 0, EVFILT_TIMER, EV_DELETE, 0, 0, 0);
 	if (earliest_expire != UINT64_MAX) {
-		EV_SET(&chlist[nchanges++], (uintptr_t) libinput, EVFILT_TIMER,
-		       EV_ADD | EV_ONESHOT, 0,
-		       earliest_expire >= now ? earliest_expire - now : 0,
-		       libinput->timer.source);
+		EV_SET(
+		  &chlist[nchanges++], 0, EVFILT_TIMER, EV_ADD | EV_ONESHOT, 0,
+		  earliest_expire > now ? (earliest_expire - now) / 1000 + 1
+					: 0,
+		  libinput->timer.source);
 	}
 
 	if (kevent(libinput->epoll_fd, chlist, nchanges, NULL, 0, NULL) == -1) {
@@ -134,14 +135,14 @@ libinput_timer_handler(void *data)
 	uint64_t discard;
 	int r;
 
+#ifdef __linux__
 	r = read(libinput->timer.fd, &discard, sizeof(discard));
 	if (r == -1 && errno != EAGAIN)
 		log_bug_libinput(libinput,
 				 "Error %d reading from timerfd (%s)",
 				 errno,
 				 strerror(errno));
-
-	fprintf(stderr, "handling timer\n");
+#endif
 
 	now = libinput_now(libinput);
 	if (now == 0)

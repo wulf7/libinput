@@ -217,6 +217,9 @@ libinput_log_set_handler(struct libinput *libinput,
 }
 
 static void
+libinput_device_group_destroy(struct libinput_device_group *group);
+
+static void
 libinput_post_event(struct libinput *libinput,
 		    struct libinput_event *event);
 
@@ -973,6 +976,7 @@ libinput_init(struct libinput *libinput,
 	libinput->refcount = 1;
 	list_init(&libinput->source_destroy_list);
 	list_init(&libinput->seat_list);
+	list_init(&libinput->device_group_list);
 
 	if (libinput_timer_subsys_init(libinput) != 0) {
 		free(libinput->events);
@@ -1012,6 +1016,7 @@ libinput_unref(struct libinput *libinput)
 	struct libinput_event *event;
 	struct libinput_device *device, *next_device;
 	struct libinput_seat *seat, *next_seat;
+	struct libinput_device_group *group, *next_group;
 
 	if (libinput == NULL)
 		return NULL;
@@ -1037,6 +1042,13 @@ libinput_unref(struct libinput *libinput)
 			libinput_device_destroy(device);
 
 		libinput_seat_destroy(seat);
+	}
+
+	list_for_each_safe(group,
+			   next_group,
+			   &libinput->device_group_list,
+			   link) {
+		libinput_device_group_destroy(group);
 	}
 
 	libinput_timer_subsys_destroy(libinput);
@@ -2002,7 +2014,8 @@ libinput_device_group_ref(struct libinput_device_group *group)
 }
 
 struct libinput_device_group *
-libinput_device_group_create(const char *identifier)
+libinput_device_group_create(struct libinput *libinput,
+			     const char *identifier)
 {
 	struct libinput_device_group *group;
 
@@ -2015,11 +2028,30 @@ libinput_device_group_create(const char *identifier)
 		group->identifier = strdup(identifier);
 		if (!group->identifier) {
 			free(group);
-			group = NULL;
+			return NULL;
 		}
 	}
 
+	list_init(&group->link);
+	list_insert(&libinput->device_group_list, &group->link);
+
 	return group;
+}
+
+struct libinput_device_group *
+libinput_device_group_find_group(struct libinput *libinput,
+				 const char *identifier)
+{
+	struct libinput_device_group *g = NULL;
+
+	list_for_each(g, &libinput->device_group_list, link) {
+		if (identifier && g->identifier &&
+		    streq(g->identifier, identifier)) {
+			return g;
+		}
+	}
+
+	return g;
 }
 
 void
@@ -2033,6 +2065,7 @@ libinput_device_set_device_group(struct libinput_device *device,
 static void
 libinput_device_group_destroy(struct libinput_device_group *group)
 {
+	list_remove(&group->link);
 	free(group->identifier);
 	free(group);
 }
@@ -2252,7 +2285,6 @@ libinput_device_config_accel_set_speed(struct libinput_device *device,
 
 	return device->config.accel->set_speed(device, speed);
 }
-
 LIBINPUT_EXPORT double
 libinput_device_config_accel_get_speed(struct libinput_device *device)
 {
@@ -2269,6 +2301,52 @@ libinput_device_config_accel_get_default_speed(struct libinput_device *device)
 		return 0;
 
 	return device->config.accel->get_default_speed(device);
+}
+
+LIBINPUT_EXPORT uint32_t
+libinput_device_config_accel_get_profiles(struct libinput_device *device)
+{
+	if (!libinput_device_config_accel_is_available(device))
+		return 0;
+
+	return device->config.accel->get_profiles(device);
+}
+
+LIBINPUT_EXPORT enum libinput_config_accel_profile
+libinput_device_config_accel_get_profile(struct libinput_device *device)
+{
+	if (!libinput_device_config_accel_is_available(device))
+		return LIBINPUT_CONFIG_ACCEL_PROFILE_NONE;
+
+	return device->config.accel->get_profile(device);
+}
+
+LIBINPUT_EXPORT enum libinput_config_accel_profile
+libinput_device_config_accel_get_default_profile(struct libinput_device *device)
+{
+	if (!libinput_device_config_accel_is_available(device))
+		return LIBINPUT_CONFIG_ACCEL_PROFILE_NONE;
+
+	return device->config.accel->get_profile(device);
+}
+
+LIBINPUT_EXPORT enum libinput_config_status
+libinput_device_config_accel_set_profile(struct libinput_device *device,
+					 enum libinput_config_accel_profile profile)
+{
+	switch (profile) {
+	case LIBINPUT_CONFIG_ACCEL_PROFILE_FLAT:
+	case LIBINPUT_CONFIG_ACCEL_PROFILE_ADAPTIVE:
+		break;
+	default:
+		return LIBINPUT_CONFIG_STATUS_INVALID;
+	}
+
+	if (!libinput_device_config_accel_is_available(device) ||
+	    (libinput_device_config_accel_get_profiles(device) & profile) == 0)
+		return LIBINPUT_CONFIG_STATUS_UNSUPPORTED;
+
+	return device->config.accel->set_profile(device, profile);
 }
 
 LIBINPUT_EXPORT int

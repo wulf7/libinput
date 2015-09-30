@@ -63,6 +63,7 @@ enum options {
 	OPT_SCROLL_METHOD,
 	OPT_SCROLL_BUTTON,
 	OPT_SPEED,
+	OPT_PROFILE,
 };
 
 static void
@@ -74,8 +75,12 @@ log_handler(struct libinput *li,
 	vprintf(format, args);
 }
 
+#ifndef __linux__
+const char *program_invocation_short_name;
+#endif
+
 void
-tools_usage(const char *argv0)
+tools_usage()
 {
 	printf("Usage: %s [options] [--udev [<seat>]|--device /dev/input/event0]\n"
 	       "--udev <seat>.... Use udev device discovery (default).\n"
@@ -98,6 +103,7 @@ tools_usage(const char *argv0)
 	       "--set-click-method=[none|clickfinger|buttonareas] .... set the desired click method\n"
 	       "--set-scroll-method=[none|twofinger|edge|button] ... set the desired scroll method\n"
 	       "--set-scroll-button=BTN_MIDDLE ... set the button to the given button code\n"
+	       "--set-profile=[adaptive|flat].... set pointer acceleration profile\n"
 	       "--set-speed=<value>.... set pointer acceleration speed\n"
 	       "\n"
 	       "These options apply to all applicable devices, if a feature\n"
@@ -107,7 +113,7 @@ tools_usage(const char *argv0)
 	       "--grab .......... Exclusively grab all openend devices\n"
 	       "--verbose ....... Print debugging output.\n"
 	       "--help .......... Print this help.\n",
-		argv0);
+		program_invocation_short_name);
 }
 
 void
@@ -130,6 +136,7 @@ tools_init_context(struct tools_context *context)
 	options->backend = BACKEND_UDEV;
 	options->seat = "seat0";
 	options->speed = 0.0;
+	options->profile = LIBINPUT_CONFIG_ACCEL_PROFILE_NONE;
 }
 
 int
@@ -161,6 +168,7 @@ tools_parse_args(int argc, char **argv, struct tools_context *context)
 			{ "set-click-method", 1, 0, OPT_CLICK_METHOD },
 			{ "set-scroll-method", 1, 0, OPT_SCROLL_METHOD },
 			{ "set-scroll-button", 1, 0, OPT_SCROLL_BUTTON },
+			{ "set-profile", 1, 0, OPT_PROFILE },
 			{ "speed", 1, 0, OPT_SPEED },
 			{ 0, 0, 0, 0}
 		};
@@ -169,15 +177,19 @@ tools_parse_args(int argc, char **argv, struct tools_context *context)
 		if (c == -1)
 			break;
 
+#ifndef __linux__
+		program_invocation_short_name = argv[0];
+#endif
+
 		switch(c) {
 		case 'h':
 		case OPT_HELP:
-			tools_usage(argv[0]);
+			tools_usage();
 			exit(0);
 		case OPT_DEVICE:
 			options->backend = BACKEND_DEVICE;
 			if (!optarg) {
-				tools_usage(argv[0]);
+				tools_usage();
 				return 1;
 			}
 			options->device = optarg;
@@ -231,7 +243,7 @@ tools_parse_args(int argc, char **argv, struct tools_context *context)
 			break;
 		case OPT_CLICK_METHOD:
 			if (!optarg) {
-				tools_usage(argv[0]);
+				tools_usage();
 				return 1;
 			}
 			if (streq(optarg, "none")) {
@@ -244,13 +256,13 @@ tools_parse_args(int argc, char **argv, struct tools_context *context)
 				options->click_method =
 				LIBINPUT_CONFIG_CLICK_METHOD_BUTTON_AREAS;
 			} else {
-				tools_usage(argv[0]);
+				tools_usage();
 				return 1;
 			}
 			break;
 		case OPT_SCROLL_METHOD:
 			if (!optarg) {
-				tools_usage(argv[0]);
+				tools_usage();
 				return 1;
 			}
 			if (streq(optarg, "none")) {
@@ -266,13 +278,13 @@ tools_parse_args(int argc, char **argv, struct tools_context *context)
 				options->scroll_method =
 				LIBINPUT_CONFIG_SCROLL_ON_BUTTON_DOWN;
 			} else {
-				tools_usage(argv[0]);
+				tools_usage();
 				return 1;
 			}
 			break;
 		case OPT_SCROLL_BUTTON:
 			if (!optarg) {
-				tools_usage(argv[0]);
+				tools_usage();
 				return 1;
 			}
 			options->scroll_button =
@@ -287,20 +299,34 @@ tools_parse_args(int argc, char **argv, struct tools_context *context)
 			break;
 		case OPT_SPEED:
 			if (!optarg) {
-				tools_usage(argv[0]);
+				tools_usage();
 				return 1;
 			}
 			options->speed = atof(optarg);
 			break;
+		case OPT_PROFILE:
+			if (!optarg) {
+				tools_usage();
+				return 1;
+			}
+			if (streq(optarg, "adaptive")) {
+				options->profile = LIBINPUT_CONFIG_ACCEL_PROFILE_ADAPTIVE;
+			} else if (streq(optarg, "flat")) {
+				options->profile = LIBINPUT_CONFIG_ACCEL_PROFILE_FLAT;
+			} else {
+				tools_usage();
+				return 1;
+			}
+			break;
 		default:
-			tools_usage(argv[0]);
+			tools_usage();
 			return 1;
 		}
 
 	}
 
 	if (optind < argc) {
-		tools_usage(argv[0]);
+		tools_usage();
 		return 1;
 	}
 
@@ -449,7 +475,11 @@ tools_device_apply_config(struct libinput_device *device,
 		libinput_device_config_scroll_set_button(device,
 							 options->scroll_button);
 
-	if (libinput_device_config_accel_is_available(device))
+	if (libinput_device_config_accel_is_available(device)) {
 		libinput_device_config_accel_set_speed(device,
 						       options->speed);
+		if (options->profile != LIBINPUT_CONFIG_ACCEL_PROFILE_NONE)
+			libinput_device_config_accel_set_profile(device,
+								 options->profile);
+	}
 }
