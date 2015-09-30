@@ -8,6 +8,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <fnmatch.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -43,7 +44,7 @@ struct subsystem_config {
 };
 
 struct subsystem_config subsystems[] = {
-  { "input", "/dev/input/event", create_evdev_handler },
+  { "input", "/dev/input/event[0-9]*", create_evdev_handler },
 };
 
 #define	sizeof_field(x, field) sizeof(((struct x *)0)->field)
@@ -147,31 +148,12 @@ static char *strbase(const char *path) {
   return base;
 }
 
-/*
- */
-static size_t
-syspathlen_wo_units(const char *path) {
-  size_t len;
-
-  len = strlen(path);
-  while (len > 0) {
-    if (!((path[len-1] >= '0' && path[len-1] <= '9') || path[len-1] == '.'))
-      break;
-    --len;
-  }
-
-  return len;
-}
-
 static struct subsystem_config *
 get_subsystem_config_by_syspath(const char *path) {
-  size_t len, i;
-
-  len = syspathlen_wo_units(path);
+  size_t i;
 
   for (i = 0; i < nitems(subsystems); i++)
-    if (len == strlen(subsystems[i].syspath) &&
-        strncmp(path, subsystems[i].syspath, len) == 0)
+    if (fnmatch(subsystems[i].syspath, path, 0) == 0)
       return &subsystems[i];
 
   return NULL;
@@ -577,7 +559,7 @@ udev_filter_match(struct udev_filter_head *ufh, const char *syspath) {
   STAILQ_FOREACH(fe, ufh, next)
     if (fe->type == UDEV_FILTER_TYPE_SUBSYSTEM &&
         fe->neg == 0 &&
-        strcmp(fe->expr, subsystem) == 0)
+        fnmatch(fe->expr, subsystem, 0) == 0)
       return 1;
 
   return 0;
