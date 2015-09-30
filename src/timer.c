@@ -132,10 +132,10 @@ libinput_timer_handler(void *data)
 	struct libinput *libinput = data;
 	struct libinput_timer *timer, *tmp;
 	uint64_t now;
+#ifdef HAVE_TIMERFD_H
 	uint64_t discard;
 	int r;
 
-#ifdef __linux__
 	r = read(libinput->timer.fd, &discard, sizeof(discard));
 	if (r == -1 && errno != EAGAIN)
 		log_bug_libinput(libinput,
