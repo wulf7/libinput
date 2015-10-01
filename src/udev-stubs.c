@@ -550,17 +550,24 @@ static void free_dev_list(struct udev_list_head *head) {
 static int
 udev_filter_match(struct udev_filter_head *ufh, const char *syspath) {
   struct udev_filter_entry *fe;
-  const char *subsystem;
+  const char *subsystem, *sysname;
 
   subsystem = get_subsystem_by_syspath(syspath);
   if (strcmp(subsystem, UNKNOWN_SUBSYSTEM) == 0)
     return 0;
 
-  STAILQ_FOREACH(fe, ufh, next)
+  sysname = strbase(syspath);
+
+  STAILQ_FOREACH(fe, ufh, next) {
     if (fe->type == UDEV_FILTER_TYPE_SUBSYSTEM &&
         fe->neg == 0 &&
         fnmatch(fe->expr, subsystem, 0) == 0)
       return 1;
+    if (fe->type == UDEV_FILTER_TYPE_SYSNAME &&
+        fe->neg == 0 &&
+        fnmatch(fe->expr, sysname, 0) == 0)
+      return 1;
+  }
 
   return 0;
 }
