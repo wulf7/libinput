@@ -25,8 +25,6 @@
 
 #include "config.h"
 
-#include <sys/stat.h>
-
 #include <errno.h>
 #include <stdbool.h>
 #include <stdlib.h>

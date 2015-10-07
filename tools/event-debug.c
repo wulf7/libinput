@@ -32,16 +32,14 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#ifdef __linux__
 #include <libudev.h>
+#ifdef __linux__
 #include "linux/input.h"
 #else
-#include "udev-stubs.h"
 #include <dev/evdev/input.h>
 #endif
 #include <sys/ioctl.h>
 
-#include <libevdev/libevdev.h>
 #include <libinput.h>
 #include <libevdev/libevdev.h>
 

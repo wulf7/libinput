@@ -46,18 +46,6 @@ AC_PROG_GREP
 LT_PREREQ([2.2])
 LT_INIT
 
-case "$host_os" in
-*linux*)
-	opsys=linux
-	;;
-*freebsd*)
-	opsys=freebsd
-	;;
-*)
-	opsys=$host_os
-	;;
-esac
-
 AC_CHECK_DECL(EPOLL_CLOEXEC,
              [HAVE_EPOLL_H=yes],
              [HAVE_EPOLL_H=no],
@@ -87,26 +75,9 @@ AC_CHECK_DECL(CLOCK_MONOTONIC,[],
 	      [AC_MSG_ERROR("CLOCK_MONOTONIC is needed to compile libinput")],
 	      [[#include <time.h>]])
 
-
 PKG_PROG_PKG_CONFIG()
 PKG_CHECK_MODULES(MTDEV, [mtdev >= 1.1.0])
-if test "x$opsys" = "xlinux"; then
-	PKG_CHECK_MODULES(LIBUDEV, [libudev])
-fi
-HAVE_LIBDEVQ="no"
-if test "x$opsys" = "xfreebsd"; then
-	AC_CHECK_HEADERS([libprocstat.h],
-                         [AC_SEARCH_LIBS([procstat_open_sysctl], [procstat])],
-                         [],
-                         [#include <sys/param.h>
-                          #include <sys/queue.h>
-                          #include <sys/socket.h>])
-	PKG_CHECK_MODULES(LIBDEVQ, [libdevq-1.0], [HAVE_LIBDEVQ="yes"])
-fi
-if test "x$HAVE_LIBDEVQ" = "xyes"; then
-	AC_DEFINE(HAVE_LIBDEVQ, 1, [Have libdevq support])
-	LDFLAGS="$LDFLAGS -pthread"
-fi
+PKG_CHECK_MODULES(LIBUDEV, [libudev])
 PKG_CHECK_MODULES(LIBEVDEV, [libevdev >= 0.4])
 
 AC_ARG_WITH(libunwind,

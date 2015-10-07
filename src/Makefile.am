@@ -25,22 +25,18 @@ libinput_la_SOURCES =			\
 	path.c				\
 	udev-seat.c			\
 	udev-seat.h			\
-	udev-stubs.c			\
-	udev-stubs.h			\
 	timer.c				\
 	timer.h				\
 	../include/linux/input.h
 
 libinput_la_LIBADD = $(MTDEV_LIBS) \
 		     $(LIBUDEV_LIBS) \
-                     $(LIBDEVQ_LIBS) \
 		     $(LIBEVDEV_LIBS) \
 		     libinput-util.la
 
 libinput_la_CFLAGS = -I$(top_srcdir)/include \
 		     $(MTDEV_CFLAGS)	\
 		     $(LIBUDEV_CFLAGS)	\
-                     $(LIBDEVQ_CFLAGS)  \
 		     $(LIBEVDEV_CFLAGS)	\
 		     $(GCC_CFLAGS)
 EXTRA_libinput_la_DEPENDENCIES = $(srcdir)/libinput.sym
@@ -59,7 +55,7 @@ libfilter_la_SOURCES = \
 	filter.h \
 	filter-private.h
 libfilter_la_LIBADD =
-libfilter_la_CFLAGS =
+libfilter_la_CFLAGS = $(LIBUDEV_CFLAGS)
 
 libinput_la_LDFLAGS = -version-info $(LIBINPUT_LT_VERSION) -shared \
 		      -Wl,--version-script=$(srcdir)/libinput.sym

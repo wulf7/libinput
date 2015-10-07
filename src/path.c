@@ -27,11 +27,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <sys/stat.h>
-#ifdef __linux__
 #include <libudev.h>
-#else
-#include "udev-stubs.h"
-#endif
 
 #include "path.h"
 #include "evdev.h"
