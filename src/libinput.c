@@ -1713,25 +1713,27 @@ void
 gesture_notify_pinch(struct libinput_device *device,
 		     uint64_t time,
 		     enum libinput_event_type type,
+		     int finger_count,
 		     const struct normalized_coords *delta,
 		     const struct normalized_coords *unaccel,
 		     double scale,
 		     double angle)
 {
-	gesture_notify(device, time, type, 2, 0, delta, unaccel,
-		       scale, angle);
+	gesture_notify(device, time, type, finger_count, 0,
+		       delta, unaccel, scale, angle);
 }
 
 void
 gesture_notify_pinch_end(struct libinput_device *device,
 			 uint64_t time,
+			 int finger_count,
 			 double scale,
 			 int cancelled)
 {
 	const struct normalized_coords zero = { 0.0, 0.0 };
 
 	gesture_notify(device, time, LIBINPUT_EVENT_GESTURE_PINCH_END,
-		       2, cancelled, &zero, &zero, scale, 0.0);
+		       finger_count, cancelled, &zero, &zero, scale, 0.0);
 }
 
 static void
@@ -2051,7 +2053,7 @@ libinput_device_group_find_group(struct libinput *libinput,
 		}
 	}
 
-	return g;
+	return NULL;
 }
 
 void

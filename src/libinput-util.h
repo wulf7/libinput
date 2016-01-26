@@ -38,12 +38,13 @@
 #define VENDOR_ID_APPLE 0x5ac
 #define VENDOR_ID_WACOM 0x56a
 #define VENDOR_ID_SYNAPTICS_SERIAL 0x002
+#define PRODUCT_ID_APPLE_KBD_TOUCHPAD 0x273
 #define PRODUCT_ID_SYNAPTICS_SERIAL 0x007
 
 /* The HW DPI rate we normalize to before calculating pointer acceleration */
 #define DEFAULT_MOUSE_DPI 1000
 
-#define CASE_RETURN_STRING(a) case a: return #a;
+#define CASE_RETURN_STRING(a) case a: return #a
 
 /*
  * This list data structure is a verbatim copy from wayland-util.h from the

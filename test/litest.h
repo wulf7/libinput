@@ -142,6 +142,10 @@ enum litest_device_type {
 	LITEST_NEXUS4_TOUCH_SCREEN = -28,
 	LITEST_MAGIC_TRACKPAD = -29,
 	LITEST_ELANTECH_TOUCHPAD = -30,
+	LITEST_MOUSE_GLADIUS = -31,
+	LITEST_MOUSE_WHEEL_CLICK_ANGLE = -32,
+	LITEST_APPLE_KEYBOARD = -33,
+	LITEST_ANKER_MOUSE_KBD = -34,
 };
 
 enum litest_device_feature {
@@ -402,6 +406,23 @@ struct libevdev_uinput * litest_create_uinput_abs_device(const char *name,
 							 struct input_id *id,
 							 const struct input_absinfo *abs,
 							 ...);
+#define litest_assert_double_eq(a_, b_)\
+	ck_assert_int_eq((int)(a_ * 256), (int)(b_ * 256))
+
+#define litest_assert_double_ne(a_, b_)\
+	ck_assert_int_ne((int)(a_ * 256), (int)(b_ * 256))
+
+#define litest_assert_double_lt(a_, b_)\
+	ck_assert_int_lt((int)(a_ * 256), (int)(b_ * 256))
+
+#define litest_assert_double_le(a_, b_)\
+	ck_assert_int_le((int)(a_ * 256), (int)(b_ * 256))
+
+#define litest_assert_double_gt(a_, b_)\
+	ck_assert_int_gt((int)(a_ * 256), (int)(b_ * 256))
+
+#define litest_assert_double_ge(a_, b_)\
+	ck_assert_int_ge((int)(a_ * 256), (int)(b_ * 256))
 
 void litest_timeout_tap(void);
 void litest_timeout_tapndrag(void);
@@ -529,16 +550,6 @@ litest_enable_buttonareas(struct litest_device *dev)
 				 LIBINPUT_CONFIG_CLICK_METHOD_BUTTON_AREAS);
 	expected = LIBINPUT_CONFIG_STATUS_SUCCESS;
 	litest_assert_int_eq(status, expected);
-}
-
-static inline int
-litest_is_synaptics_semi_mt(struct litest_device *dev)
-{
-	struct libevdev *evdev = dev->evdev;
-
-	return libevdev_has_property(evdev, INPUT_PROP_SEMI_MT) &&
-		libevdev_get_id_vendor(evdev) == 0x2 &&
-		libevdev_get_id_product(evdev) == 0x7;
 }
 
 static inline void

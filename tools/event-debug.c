@@ -261,12 +261,18 @@ print_button_event(struct libinput_event *ev)
 {
 	struct libinput_event_pointer *p = libinput_event_get_pointer_event(ev);
 	enum libinput_button_state state;
+	const char *buttonname;
+	int button;
 
 	print_event_time(libinput_event_pointer_get_time(p));
 
+	button = libinput_event_pointer_get_button(p);
+	buttonname = libevdev_event_code_get_name(EV_KEY, button);
+
 	state = libinput_event_pointer_get_button_state(p);
-	printf("%3d %s, seat count: %u\n",
-	       libinput_event_pointer_get_button(p),
+	printf("%s (%d) %s, seat count: %u\n",
+	       buttonname ? buttonname : "???",
+	       button,
 	       state == LIBINPUT_BUTTON_STATE_PRESSED ? "pressed" : "released",
 	       libinput_event_pointer_get_seat_button_count(p));
 }
@@ -276,17 +282,23 @@ print_axis_event(struct libinput_event *ev)
 {
 	struct libinput_event_pointer *p = libinput_event_get_pointer_event(ev);
 	double v = 0, h = 0;
+	const char *have_vert = "",
+		   *have_horiz = "";
 
 	if (libinput_event_pointer_has_axis(p,
-				    LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL))
+				LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL)) {
 		v = libinput_event_pointer_get_axis_value(p,
 			      LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL);
+		have_vert = "*";
+	}
 	if (libinput_event_pointer_has_axis(p,
-				    LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL))
+				LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL)) {
 		h = libinput_event_pointer_get_axis_value(p,
 			      LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL);
+		have_horiz = "*";
+	}
 	print_event_time(libinput_event_pointer_get_time(p));
-	printf("vert %.2f horiz %.2f\n", v, h);
+	printf("vert %.2f%s horiz %.2f%s\n", v, have_vert, h, have_horiz);
 }
 
 static void
@@ -477,6 +489,9 @@ main(int argc, char **argv)
 	struct libinput *li;
 	struct timespec tp;
 
+	clock_gettime(CLOCK_MONOTONIC, &tp);
+	start_time = tp.tv_sec * 1000 + tp.tv_nsec / 1000000;
+
 	tools_init_context(&context);
 
 	if (tools_parse_args(argc, argv, &context))
@@ -485,9 +500,6 @@ main(int argc, char **argv)
 	li = tools_open_backend(&context);
 	if (!li)
 		return 1;
-
-	clock_gettime(CLOCK_MONOTONIC, &tp);
-	start_time = tp.tv_sec * 1000 + tp.tv_nsec / 1000000;
 
 	mainloop(li);
 
