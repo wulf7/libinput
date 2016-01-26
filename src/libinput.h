@@ -29,9 +29,9 @@
 extern "C" {
 #endif
 
+#include <stdarg.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <libudev.h>
 
 #define LIBINPUT_ATTRIBUTE_PRINTF(_format, _args) \

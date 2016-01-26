@@ -54,7 +54,7 @@ libfilter_la_SOURCES = \
 	filter.c \
 	filter.h \
 	filter-private.h
-libfilter_la_LIBADD =
+libfilter_la_LIBADD = $(LIBUDEV_LIBS)
 libfilter_la_CFLAGS = $(LIBUDEV_CFLAGS)
 
 libinput_la_LDFLAGS = -version-info $(LIBINPUT_LT_VERSION) -shared \
