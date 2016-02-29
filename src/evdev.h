@@ -64,6 +64,7 @@ enum evdev_device_seat_capability {
 	EVDEV_DEVICE_POINTER = (1 << 0),
 	EVDEV_DEVICE_KEYBOARD = (1 << 1),
 	EVDEV_DEVICE_TOUCH = (1 << 2),
+	EVDEV_DEVICE_TABLET = (1 << 3),
 	EVDEV_DEVICE_GESTURE = (1 << 5),
 };
 
@@ -113,6 +114,9 @@ enum evdev_device_model {
 	EVDEV_MODEL_ELANTECH_TOUCHPAD = (1 << 11),
 	EVDEV_MODEL_LENOVO_X220_TOUCHPAD_FW81 = (1 << 12),
 	EVDEV_MODEL_APPLE_INTERNAL_KEYBOARD = (1 << 13),
+	EVDEV_MODEL_CYBORG_RAT = (1 << 14),
+	EVDEV_MODEL_CYAPA = (1 << 15),
+	EVDEV_MODEL_ALPS_RUSHMORE = (1 << 16),
 };
 
 struct mt_slot {
@@ -270,6 +274,11 @@ struct evdev_dispatch_interface {
 	/* A device was resumed */
 	void (*device_resumed)(struct evdev_device *device,
 			       struct evdev_device *resumed_device);
+
+	/* Called immediately after the LIBINPUT_EVENT_DEVICE_ADDED event
+	 * was sent */
+	void (*post_added)(struct evdev_device *device,
+			   struct evdev_dispatch *dispatch);
 };
 
 struct evdev_dispatch {
@@ -286,6 +295,18 @@ struct evdev_device *
 evdev_device_create(struct libinput_seat *seat,
 		    struct udev_device *device);
 
+void
+evdev_transform_absolute(struct evdev_device *device,
+			 struct device_coords *point);
+
+void
+evdev_transform_relative(struct evdev_device *device,
+			 struct device_coords *point);
+
+void
+evdev_init_calibration(struct evdev_device *device,
+		       struct evdev_dispatch *dispatch);
+
 int
 evdev_device_init_pointer_acceleration(struct evdev_device *device,
 				       struct motion_filter *filter);
@@ -295,6 +316,9 @@ evdev_touchpad_create(struct evdev_device *device);
 
 struct evdev_dispatch *
 evdev_mt_touchpad_create(struct evdev_device *device);
+
+struct evdev_dispatch *
+evdev_tablet_create(struct evdev_device *device);
 
 void
 evdev_tag_touchpad(struct evdev_device *device,

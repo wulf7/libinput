@@ -49,15 +49,19 @@ static struct normalized_coords
 tp_get_touches_delta(struct tp_dispatch *tp, bool average)
 {
 	struct tp_touch *t;
-	unsigned int i, nchanged = 0;
+	unsigned int i, nactive = 0;
 	struct normalized_coords normalized;
 	struct normalized_coords delta = {0.0, 0.0};
 
 	for (i = 0; i < tp->num_slots; i++) {
 		t = &tp->touches[i];
 
-		if (tp_touch_active(tp, t) && t->dirty) {
-			nchanged++;
+		if (!tp_touch_active(tp, t))
+			continue;
+
+		nactive++;
+
+		if (t->dirty) {
 			normalized = tp_get_delta(t);
 
 			delta.x += normalized.x;
@@ -65,11 +69,11 @@ tp_get_touches_delta(struct tp_dispatch *tp, bool average)
 		}
 	}
 
-	if (!average || nchanged == 0)
+	if (!average || nactive == 0)
 		return delta;
 
-	delta.x /= nchanged;
-	delta.y /= nchanged;
+	delta.x /= nactive;
+	delta.y /= nactive;
 
 	return delta;
 }
@@ -240,6 +244,13 @@ tp_gesture_handle_state_none(struct tp_dispatch *tp, uint64_t time)
 	if (ntouches < 2)
 		return GESTURE_STATE_NONE;
 
+	if (!tp->gesture.enabled) {
+		if (ntouches == 2)
+			return GESTURE_STATE_SCROLL;
+		else
+			return GESTURE_STATE_SWIPE;
+	}
+
 	first = touches[0];
 	second = touches[1];
 
@@ -271,8 +282,7 @@ tp_gesture_handle_state_none(struct tp_dispatch *tp, uint64_t time)
 		if (first == second)
 			return GESTURE_STATE_NONE;
 
-	} else if (!tp->gesture.enabled)
-		return GESTURE_STATE_SCROLL;
+	}
 
 	tp->gesture.initial_time = time;
 	first->gesture.initial = first->point;
@@ -329,6 +339,7 @@ tp_gesture_handle_state_unknown(struct tp_dispatch *tp, uint64_t time)
 	/* Else check if one finger is > 20mm below the others */
 	vert_distance = abs(first->point.y - second->point.y);
 	if (vert_distance > 20 * yres &&
+	    tp->gesture.finger_count > 2 &&
 	    tp->gesture.enabled) {
 		tp_gesture_init_pinch(tp);
 		return GESTURE_STATE_PINCH;

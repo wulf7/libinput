@@ -216,14 +216,27 @@ evdev_device_led_update(struct evdev_device *device, enum libinput_led leds)
 	(void)i; /* no, we really don't care about the return value */
 }
 
-static void
-transform_absolute(struct evdev_device *device,
-		   struct device_coords *point)
+void
+evdev_transform_absolute(struct evdev_device *device,
+			 struct device_coords *point)
 {
 	if (!device->abs.apply_calibration)
 		return;
 
 	matrix_mult_vec(&device->abs.calibration, &point->x, &point->y);
+}
+
+void
+evdev_transform_relative(struct evdev_device *device,
+			 struct device_coords *point)
+{
+	struct matrix rel_matrix;
+
+	if (!device->abs.apply_calibration)
+		return;
+
+	matrix_to_relative(&rel_matrix, &device->abs.calibration);
+	matrix_mult_vec(&rel_matrix, &point->x, &point->y);
 }
 
 static inline double
@@ -344,7 +357,7 @@ evdev_flush_pending_event(struct evdev_device *device, uint64_t time)
 
 		seat->slot_map |= 1 << seat_slot;
 		point = device->mt.slots[slot].point;
-		transform_absolute(device, &point);
+		evdev_transform_absolute(device, &point);
 
 		touch_notify_touch_down(base, time, slot, seat_slot,
 					&point);
@@ -359,7 +372,7 @@ evdev_flush_pending_event(struct evdev_device *device, uint64_t time)
 		if (seat_slot == -1)
 			break;
 
-		transform_absolute(device, &point);
+		evdev_transform_absolute(device, &point);
 		touch_notify_touch_motion(base, time, slot, seat_slot,
 					  &point);
 		break;
@@ -398,13 +411,13 @@ evdev_flush_pending_event(struct evdev_device *device, uint64_t time)
 		seat->slot_map |= 1 << seat_slot;
 
 		point = device->abs.point;
-		transform_absolute(device, &point);
+		evdev_transform_absolute(device, &point);
 
 		touch_notify_touch_down(base, time, -1, seat_slot, &point);
 		break;
 	case EVDEV_ABSOLUTE_MOTION:
 		point = device->abs.point;
-		transform_absolute(device, &point);
+		evdev_transform_absolute(device, &point);
 
 		if (device->seat_caps & EVDEV_DEVICE_TOUCH) {
 			seat_slot = device->abs.seat_slot;
@@ -966,6 +979,7 @@ struct evdev_dispatch_interface fallback_interface = {
 	NULL, /* device_removed */
 	NULL, /* device_suspended */
 	NULL, /* device_resumed */
+	NULL, /* post_added */
 };
 
 static uint32_t
@@ -1195,7 +1209,7 @@ evdev_init_button_scroll(struct evdev_device *device,
 	return 0;
 }
 
-static void
+void
 evdev_init_calibration(struct evdev_device *device,
 		       struct evdev_dispatch *dispatch)
 {
@@ -1667,6 +1681,9 @@ evdev_read_model_flags(struct evdev_device *device)
 		{ "LIBINPUT_MODEL_JUMPING_SEMI_MT", EVDEV_MODEL_JUMPING_SEMI_MT },
 		{ "LIBINPUT_MODEL_ELANTECH_TOUCHPAD", EVDEV_MODEL_ELANTECH_TOUCHPAD },
 		{ "LIBINPUT_MODEL_APPLE_INTERNAL_KEYBOARD", EVDEV_MODEL_APPLE_INTERNAL_KEYBOARD },
+		{ "LIBINPUT_MODEL_CYBORG_RAT", EVDEV_MODEL_CYBORG_RAT },
+		{ "LIBINPUT_MODEL_CYAPA", EVDEV_MODEL_CYAPA },
+		{ "LIBINPUT_MODEL_ALPS_RUSHMORE", EVDEV_MODEL_ALPS_RUSHMORE },
 		{ NULL, EVDEV_MODEL_DEFAULT },
 	};
 	const struct model_map *m = model_map;
@@ -1990,6 +2007,7 @@ evdev_configure_device(struct evdev_device *device)
 	struct libevdev *evdev = device->evdev;
 	const char *devnode = udev_device_get_devnode(device->udev_device);
 	enum evdev_device_udev_tags udev_tags;
+	unsigned int tablet_tags;
 
 	udev_tags = evdev_device_get_udev_tags(device, device->udev_device);
 
@@ -2065,6 +2083,21 @@ evdev_configure_device(struct evdev_device *device)
 		} else if (evdev_configure_mt_device(device) == -1) {
 			return -1;
 		}
+	}
+
+	/* libwacom assigns touchpad (or touchscreen) _and_ tablet to the
+	   tablet touch bits, so make sure we don't initialize the tablet
+	   interface for the touch device */
+	tablet_tags = EVDEV_UDEV_TAG_TABLET |
+		      EVDEV_UDEV_TAG_TOUCHPAD |
+		      EVDEV_UDEV_TAG_TOUCHSCREEN;
+	if ((udev_tags & tablet_tags) == EVDEV_UDEV_TAG_TABLET) {
+		device->dispatch = evdev_tablet_create(device);
+		device->seat_caps |= EVDEV_DEVICE_TABLET;
+		log_info(libinput,
+			 "input device '%s', %s is a tablet\n",
+			 device->devname, devnode);
+		return device->dispatch == NULL ? -1 : 0;
 	}
 
 	if (udev_tags & EVDEV_UDEV_TAG_TOUCHPAD) {
@@ -2157,6 +2190,10 @@ evdev_notify_added_device(struct evdev_device *device)
 	}
 
 	notify_added_device(&device->base);
+
+	if (device->dispatch->interface->post_added)
+		device->dispatch->interface->post_added(device,
+							device->dispatch);
 }
 
 static bool
@@ -2216,6 +2253,39 @@ evdev_drain_fd(int fd)
 
 	while (read(fd, &ev, sz) == (int)sz) {
 		/* discard all pending events */
+	}
+}
+
+static inline void
+evdev_pre_configure_model_quirks(struct evdev_device *device)
+{
+	/* The Cyborg RAT has a mode button that cycles through event codes.
+	 * On press, we get a release for the current mode and a press for the
+	 * next mode:
+	 * E: 0.000001 0004 0004 589833	# EV_MSC / MSC_SCAN             589833
+	 * E: 0.000001 0001 0118 0000	# EV_KEY / (null)               0
+	 * E: 0.000001 0004 0004 589834	# EV_MSC / MSC_SCAN             589834
+	 * E: 0.000001 0001 0119 0001	# EV_KEY / (null)               1
+	 * E: 0.000001 0000 0000 0000	# ------------ SYN_REPORT (0) ---------- +0ms
+	 * E: 0.705000 0004 0004 589834	# EV_MSC / MSC_SCAN             589834
+	 * E: 0.705000 0001 0119 0000	# EV_KEY / (null)               0
+	 * E: 0.705000 0004 0004 589835	# EV_MSC / MSC_SCAN             589835
+	 * E: 0.705000 0001 011a 0001	# EV_KEY / (null)               1
+	 * E: 0.705000 0000 0000 0000	# ------------ SYN_REPORT (0) ---------- +705ms
+	 * E: 1.496995 0004 0004 589833	# EV_MSC / MSC_SCAN             589833
+	 * E: 1.496995 0001 0118 0001	# EV_KEY / (null)               1
+	 * E: 1.496995 0004 0004 589835	# EV_MSC / MSC_SCAN             589835
+	 * E: 1.496995 0001 011a 0000	# EV_KEY / (null)               0
+	 * E: 1.496995 0000 0000 0000	# ------------ SYN_REPORT (0) ---------- +791ms
+	 *
+	 * https://bugs.freedesktop.org/show_bug.cgi?id=92127
+	 *
+	 * Disable the event codes to avoid stuck buttons.
+	 */
+	if(device->model_flags & EVDEV_MODEL_CYBORG_RAT) {
+		libevdev_disable_event_code(device->evdev, EV_KEY, 0x118);
+		libevdev_disable_event_code(device->evdev, EV_KEY, 0x119);
+		libevdev_disable_event_code(device->evdev, EV_KEY, 0x11a);
 	}
 }
 
@@ -2287,6 +2357,8 @@ evdev_device_create(struct libinput_seat *seat,
 	matrix_init_identity(&device->abs.calibration);
 	matrix_init_identity(&device->abs.usermatrix);
 	matrix_init_identity(&device->abs.default_calibration);
+
+	evdev_pre_configure_model_quirks(device);
 
 	if (evdev_configure_device(device) == -1)
 		goto err;
@@ -2446,6 +2518,8 @@ evdev_device_has_capability(struct evdev_device *device,
 		return !!(device->seat_caps & EVDEV_DEVICE_TOUCH);
 	case LIBINPUT_DEVICE_CAP_GESTURE:
 		return !!(device->seat_caps & EVDEV_DEVICE_GESTURE);
+	case LIBINPUT_DEVICE_CAP_TABLET_TOOL:
+		return !!(device->seat_caps & EVDEV_DEVICE_TABLET);
 	default:
 		return 0;
 	}

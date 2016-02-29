@@ -1,5 +1,5 @@
 /*
- * Copyright © 2014 Red Hat, Inc.
+ * Copyright © 2013 Red Hat, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -21,47 +21,51 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
-#ifndef _SHARED_H_
-#define _SHARED_H_
-
-#include <libinput.h>
-
-enum tools_backend {
-	BACKEND_DEVICE,
-	BACKEND_UDEV
-};
-
-struct tools_options {
-	enum tools_backend backend;
-	const char *device; /* if backend is BACKEND_DEVICE */
-	const char *seat; /* if backend is BACKEND_UDEV */
-	int grab; /* EVIOCGRAB */
-
-	int verbose;
-	int tapping;
-	int drag;
-	int drag_lock;
-	int natural_scroll;
-	int left_handed;
-	int middlebutton;
-	enum libinput_config_click_method click_method;
-	enum libinput_config_scroll_method scroll_method;
-	int scroll_button;
-	double speed;
-	int dwt;
-	enum libinput_config_accel_profile profile;
-};
-
-struct tools_context {
-	struct tools_options options;
-	void *user_data;
-};
-
-void tools_init_context(struct tools_context *context);
-int tools_parse_args(int argc, char **argv, struct tools_context *context);
-struct libinput* tools_open_backend(struct tools_context *context);
-void tools_device_apply_config(struct libinput_device *device,
-			       struct tools_options *options);
-void tools_usage();
-
+#if HAVE_CONFIG_H
+#include "config.h"
 #endif
+
+#include "litest.h"
+#include "litest-int.h"
+
+static void litest_cyborg_rat_setup(void)
+{
+	struct litest_device *d = litest_create_device(LITEST_CYBORG_RAT);
+	litest_set_current_device(d);
+}
+
+static struct input_id input_id = {
+	.bustype = 0x3,
+	.vendor = 0x6a3,
+	.product = 0xcd5,
+};
+
+static int events[] = {
+	EV_KEY, BTN_LEFT,
+	EV_KEY, BTN_RIGHT,
+	EV_KEY, BTN_MIDDLE,
+	EV_KEY, BTN_SIDE,
+	EV_KEY, BTN_EXTRA,
+	EV_KEY, BTN_FORWARD,
+	EV_KEY, BTN_TASK,
+	EV_KEY, 0x118,
+	EV_KEY, 0x119,
+	EV_KEY, 0x11a,
+	EV_REL, REL_X,
+	EV_REL, REL_Y,
+	EV_REL, REL_WHEEL,
+	-1 , -1,
+};
+
+struct litest_test_device litest_cyborg_rat_device = {
+	.type = LITEST_CYBORG_RAT,
+	.features = LITEST_RELATIVE | LITEST_BUTTON | LITEST_WHEEL,
+	.shortname = "cyborg_rat",
+	.setup = litest_cyborg_rat_setup,
+	.interface = NULL,
+
+	.name = "Saitek Cyborg R.A.T.5 Mouse",
+	.id = &input_id,
+	.absinfo = NULL,
+	.events = events,
+};

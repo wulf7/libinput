@@ -538,9 +538,9 @@ tp_palm_tap_is_palm(const struct tp_dispatch *tp, const struct tp_touch *t)
 	    t->point.x < tp->palm.right_edge)
 		return false;
 
-	/* We're inside the left/right palm edge and in the northern half of
-	 * the touchpad - this tap is a palm */
-	if (t->point.y < tp->palm.vert_center) {
+	/* We're inside the left/right palm edge and not in one of the
+	 * software button areas */
+	if (t->point.y < tp->buttons.bottom_area.top_edge) {
 		log_debug(tp_libinput_context(tp),
 			  "palm: palm-tap detected\n");
 		return true;
@@ -1196,6 +1196,16 @@ tp_keyboard_timeout(uint64_t now, void *data)
 {
 	struct tp_dispatch *tp = data;
 
+	if (tp->dwt.dwt_enabled &&
+	    long_any_bit_set(tp->dwt.key_mask,
+			     ARRAY_LENGTH(tp->dwt.key_mask))) {
+		libinput_timer_set(&tp->dwt.keyboard_timer,
+				   now + DEFAULT_KEYBOARD_ACTIVITY_TIMEOUT_2);
+		tp->dwt.keyboard_last_press_time = now;
+		log_debug(tp_libinput_context(tp), "palm: keyboard timeout refresh\n");
+		return;
+	}
+
 	tp_tap_resume(tp, now);
 
 	tp->dwt.keyboard_active = false;
@@ -1240,23 +1250,27 @@ tp_keyboard_event(uint64_t time, struct libinput_event *event, void *data)
 	struct tp_dispatch *tp = data;
 	struct libinput_event_keyboard *kbdev;
 	unsigned int timeout;
-
-	if (!tp->dwt.dwt_enabled)
-		return;
+	unsigned int key;
 
 	if (event->type != LIBINPUT_EVENT_KEYBOARD_KEY)
 		return;
 
 	kbdev = libinput_event_get_keyboard_event(event);
+	key = libinput_event_keyboard_get_key(kbdev);
 
 	/* Only trigger the timer on key down. */
 	if (libinput_event_keyboard_get_key_state(kbdev) !=
-	    LIBINPUT_KEY_STATE_PRESSED)
+	    LIBINPUT_KEY_STATE_PRESSED) {
+		long_clear_bit(tp->dwt.key_mask, key);
+		return;
+	}
+
+	if (!tp->dwt.dwt_enabled)
 		return;
 
 	/* modifier keys don't trigger disable-while-typing so things like
 	 * ctrl+zoom or ctrl+click are possible */
-	if (tp_key_ignore_for_dwt(libinput_event_keyboard_get_key(kbdev)))
+	if (tp_key_ignore_for_dwt(key))
 		return;
 
 	if (!tp->dwt.keyboard_active) {
@@ -1270,6 +1284,7 @@ tp_keyboard_event(uint64_t time, struct libinput_event *event, void *data)
 	}
 
 	tp->dwt.keyboard_last_press_time = time;
+	long_set_bit(tp->dwt.key_mask, key);
 	libinput_timer_set(&tp->dwt.keyboard_timer,
 			   time + timeout);
 }
@@ -1322,6 +1337,38 @@ tp_want_dwt(struct evdev_device *touchpad,
 }
 
 static void
+tp_dwt_pair_keyboard(struct evdev_device *touchpad,
+		     struct evdev_device *keyboard)
+{
+	struct tp_dispatch *tp = (struct tp_dispatch*)touchpad->dispatch;
+	unsigned int bus_kbd = libevdev_get_id_bustype(keyboard->evdev);
+
+	if (!tp_want_dwt(touchpad, keyboard))
+		return;
+
+	/* If we already have a keyboard paired, override it if the new one
+	 * is a serio device. Otherwise keep the current one */
+	if (tp->dwt.keyboard) {
+		if (bus_kbd != BUS_I8042)
+			return;
+
+		memset(tp->dwt.key_mask, 0, sizeof(tp->dwt.key_mask));
+		libinput_device_remove_event_listener(&tp->dwt.keyboard_listener);
+	}
+
+	libinput_device_add_event_listener(&keyboard->base,
+				&tp->dwt.keyboard_listener,
+				tp_keyboard_event, tp);
+	tp->dwt.keyboard = keyboard;
+	tp->dwt.keyboard_active = false;
+
+	log_debug(touchpad->base.seat->libinput,
+		  "palm: dwt activated with %s<->%s\n",
+		  touchpad->devname,
+		  keyboard->devname);
+}
+
+static void
 tp_interface_device_added(struct evdev_device *device,
 			  struct evdev_device *added_device)
 {
@@ -1345,20 +1392,8 @@ tp_interface_device_added(struct evdev_device *device,
 						tp_trackpoint_event, tp);
 	}
 
-	if (added_device->tags & EVDEV_TAG_KEYBOARD &&
-	    tp->dwt.keyboard == NULL &&
-	    tp_want_dwt(device, added_device)) {
-		log_debug(tp_libinput_context(tp),
-			  "palm: dwt activated with %s<->%s\n",
-			  device->devname,
-			  added_device->devname);
-
-		libinput_device_add_event_listener(&added_device->base,
-					&tp->dwt.keyboard_listener,
-					tp_keyboard_event, tp);
-		tp->dwt.keyboard = added_device;
-		tp->dwt.keyboard_active = false;
-	}
+	if (added_device->tags & EVDEV_TAG_KEYBOARD)
+	    tp_dwt_pair_keyboard(device, added_device);
 
 	if (tp->sendevents.current_mode !=
 	    LIBINPUT_CONFIG_SEND_EVENTS_DISABLED_ON_EXTERNAL_MOUSE)
@@ -1436,6 +1471,7 @@ static struct evdev_dispatch_interface tp_interface = {
 	tp_interface_device_removed,
 	tp_interface_device_removed, /* device_suspended, treat as remove */
 	tp_interface_device_added,   /* device_resumed, treat as add */
+	NULL,                        /* post_added */
 };
 
 static void
@@ -1788,14 +1824,12 @@ static int
 tp_init_palmdetect(struct tp_dispatch *tp,
 		   struct evdev_device *device)
 {
-	int width, height;
+	int width;
 
 	tp->palm.right_edge = INT_MAX;
 	tp->palm.left_edge = INT_MIN;
-	tp->palm.vert_center = INT_MIN;
 
 	width = device->abs.dimensions.x;
-	height = device->abs.dimensions.y;
 
 	/* Wacom doesn't have internal touchpads */
 	if (device->model_flags & EVDEV_MODEL_WACOM_TOUCHPAD)
@@ -1809,7 +1843,6 @@ tp_init_palmdetect(struct tp_dispatch *tp,
 	/* palm edges are 5% of the width on each side */
 	tp->palm.right_edge = device->abs.absinfo_x->maximum - width * 0.05;
 	tp->palm.left_edge = device->abs.absinfo_x->minimum + width * 0.05;
-	tp->palm.vert_center = device->abs.absinfo_y->minimum + height/2;
 
 	tp->palm.monitor_trackpoint = true;
 
@@ -1950,13 +1983,41 @@ tp_init_default_resolution(struct tp_dispatch *tp,
 	return 0;
 }
 
+static inline void
+tp_init_hysteresis(struct tp_dispatch *tp)
+{
+	int res_x, res_y;
+
+	if (tp->device->model_flags & EVDEV_MODEL_CYAPA)
+		goto want_hysteresis;
+
+	if (tp->device->model_flags & EVDEV_MODEL_ALPS_RUSHMORE)
+		goto want_hysteresis;
+
+	if (tp->semi_mt &&
+	    (tp->device->model_flags & EVDEV_MODEL_SYNAPTICS_SERIAL_TOUCHPAD))
+		goto want_hysteresis;
+
+	tp->hysteresis_margin.x = 0;
+	tp->hysteresis_margin.y = 0;
+
+	return;
+
+want_hysteresis:
+	res_x = tp->device->abs.absinfo_x->resolution;
+	res_y = tp->device->abs.absinfo_y->resolution;
+
+	tp->hysteresis_margin.x = res_x/2;
+	tp->hysteresis_margin.y = res_y/2;
+	return;
+}
+
 static int
 tp_init(struct tp_dispatch *tp,
 	struct evdev_device *device)
 {
 	int width, height;
 	double diagonal;
-	int res_x, res_y;
 
 	tp->base.interface = &tp_interface;
 	tp->device = device;
@@ -1970,8 +2031,6 @@ tp_init(struct tp_dispatch *tp,
 	if (tp_init_slots(tp, device) != 0)
 		return -1;
 
-	res_x = tp->device->abs.absinfo_x->resolution;
-	res_y = tp->device->abs.absinfo_y->resolution;
 	width = device->abs.dimensions.x;
 	height = device->abs.dimensions.y;
 	diagonal = sqrt(width*width + height*height);
@@ -1980,8 +2039,7 @@ tp_init(struct tp_dispatch *tp,
 						       EV_ABS,
 						       ABS_MT_DISTANCE);
 
-	tp->hysteresis_margin.x = res_x/2;
-	tp->hysteresis_margin.y = res_y/2;
+	tp_init_hysteresis(tp);
 
 	if (tp_init_accel(tp, diagonal) != 0)
 		return -1;

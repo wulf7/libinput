@@ -20,8 +20,10 @@ liblitest_la_SOURCES = \
 	litest-device-asus-rog-gladius.c \
 	litest-device-atmel-hover.c \
 	litest-device-bcm5974.c \
+	litest-device-cyborg-rat-5.c \
 	litest-device-elantech-touchpad.c \
 	litest-device-generic-singletouch.c \
+	litest-device-huion-pentablet.c \
 	litest-device-keyboard.c \
 	litest-device-keyboard-razer-blackwidow.c \
 	litest-device-logitech-trackball.c \
@@ -36,16 +38,24 @@ liblitest_la_SOURCES = \
 	litest-device-qemu-usb-tablet.c \
 	litest-device-synaptics.c \
 	litest-device-synaptics-hover.c \
+	litest-device-synaptics-i2c.c \
 	litest-device-synaptics-st.c \
 	litest-device-synaptics-t440.c \
 	litest-device-synaptics-x1-carbon-3rd.c \
 	litest-device-trackpoint.c \
 	litest-device-touch-screen.c \
+	litest-device-wacom-bamboo-tablet.c \
+	litest-device-wacom-cintiq-tablet.c \
+	litest-device-wacom-cintiq-24hd.c \
+	litest-device-wacom-intuos-tablet.c \
+	litest-device-wacom-isdv4-tablet.c \
 	litest-device-wacom-touch.c \
 	litest-device-wacom-intuos-finger.c \
+	litest-device-waltop-tablet.c \
 	litest-device-wheel-only.c \
 	litest-device-xen-virtual-pointer.c \
 	litest-device-vmware-virtual-usb-mouse.c \
+	litest-device-yubikey.c \
 	litest.c
 liblitest_la_LIBADD = $(top_builddir)/src/libinput-util.la
 liblitest_la_CFLAGS = $(AM_CFLAGS) \
@@ -61,6 +71,7 @@ run_tests = \
 	test-touchpad \
 	test-touchpad-tap \
 	test-touchpad-buttons \
+	test-tablet \
 	test-device \
 	test-gestures \
 	test-pointer \
@@ -105,6 +116,10 @@ test_log_SOURCES = log.c
 test_log_LDADD = $(TEST_LIBS)
 test_log_LDFLAGS = -no-install
 
+test_tablet_SOURCES = tablet.c
+test_tablet_LDADD = $(TEST_LIBS)
+test_tablet_LDFLAGS = -static
+
 test_touchpad_SOURCES = touchpad.c
 test_touchpad_LDADD = $(TEST_LIBS)
 test_touchpad_LDFLAGS = -no-install
@@ -122,6 +137,7 @@ test_trackpoint_LDADD = $(TEST_LIBS)
 test_trackpoint_LDFLAGS = -no-install
 
 test_misc_SOURCES = misc.c
+test_misc_CFLAGS= $(AM_CFLAGS) -DLIBINPUT_LT_VERSION="\"$(LIBINPUT_LT_VERSION)\""
 test_misc_LDADD = $(TEST_LIBS)
 test_misc_LDFLAGS = -no-install
 
