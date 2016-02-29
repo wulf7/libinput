@@ -104,7 +104,6 @@ libinput_timer_set(struct libinput_timer *timer, uint64_t expire)
 				 PRIu64 " expire %" PRIu64 "\n",
 				 now, expire);
 #endif
-	fprintf(stderr, "setting timer at %llu\n", (long long unsigned) expire);
 
 	assert(expire);
 
