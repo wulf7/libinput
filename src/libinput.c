@@ -1542,6 +1542,9 @@ libinput_init(struct libinput *libinput,
 	      const struct libinput_interface_backend *interface_backend,
 	      void *user_data)
 {
+	assert(interface->open_restricted != NULL);
+	assert(interface->close_restricted != NULL);
+
 #ifdef HAVE_EPOLL_H
 	libinput->epoll_fd = epoll_create1(EPOLL_CLOEXEC);;
 #else
